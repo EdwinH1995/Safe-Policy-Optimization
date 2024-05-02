@@ -290,7 +290,7 @@ class Plotter:
         select: str | None = None,
         exclude: str | None = None,
         estimator: str = 'mean',
-        save_dir: str = './',
+        save_dir = os.path.join('.', ''),
         save_name: str | None = None,
         save_format: str = 'png',
         show_image: bool = False,
@@ -368,7 +368,8 @@ class Plotter:
         if cost_limit:
             axes[1].axhline(y=cost_limit, ls='--', c='black', linewidth=2)
         if save_name is None:
-            save_name = all_logdirs[0].split('/')[-1]
+            save_name = os.path.basename(all_logdirs[0])
+            # save_name = all_logdirs[0].split('/')[-1]
         if show_image:
             plt.show()
         save_dir = save_dir.replace('runs', 'results')

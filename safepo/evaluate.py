@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
+import sys
 import argparse
 import os
 import json
@@ -25,23 +26,25 @@ import joblib
 import torch
 
 def eval_single_agent(eval_dir, eval_episodes):
-
+    print(f"Evaluating directory: {eval_dir}")
     torch.set_num_threads(4)
-    config_path = eval_dir + '/config.json'
+    config_path = os.path.join(eval_dir, 'config.json')
+    # config_path = eval_dir + '/config.json'
     config = json.load(open(config_path, 'r'))
 
     env_id = config['task'] if 'task' in config.keys() else config['env_name']
     env_norms = os.listdir(eval_dir)
     env_norms = [env_norm for env_norm in env_norms if env_norm.endswith('.pkl')]
     final_norm_name = sorted(env_norms)[-1]
-
-    model_dir = eval_dir + '/torch_save'
+    model_dir = os.path.join(eval_dir, 'torch_save')
+    # model_dir = eval_dir + '/torch_save'
     models = os.listdir(model_dir)
     models = [model for model in models if model.endswith('.pt')]
     final_model_name = sorted(models)[-1]
-
-    model_path = model_dir + '/' + final_model_name
-    norm_path = eval_dir + '/' + final_norm_name
+    model_path = os.path.join(model_dir, final_model_name)
+    # model_path = model_dir + '/' + final_model_name
+    norm_path = os.path.join(eval_dir, final_norm_name)
+    # norm_path = eval_dir + '/' + final_norm_name
 
     eval_env, obs_space, act_space = make_sa_mujoco_env(num_envs=config['num_envs'], env_id=env_id, seed=None)
 
@@ -88,8 +91,8 @@ def eval_single_agent(eval_dir, eval_episodes):
 
 
 def eval_multi_agent(eval_dir, eval_episodes):
-
-    config_path = eval_dir + '/config.json'
+    config_path = os.path.join(eval_dir, 'config.json')
+    # config_path = eval_dir + '/config.json'
     config = json.load(open(config_path, 'r'))
 
     env_name = config['env_name']
@@ -109,8 +112,9 @@ def eval_multi_agent(eval_dir, eval_episodes):
             seed=np.random.randint(0, 1000),
             cfg_train=config,
         )
-
-    model_dir = eval_dir + f"/models_seed{config['seed']}"
+    seed = config['seed']  # Assuming seed is retrieved from config dictionary
+    model_dir = os.path.join(eval_dir, f"models_seed{seed}")
+    # model_dir = eval_dir + f"/models_seed{config['seed']}"
     algo = config['algorithm_name']
     if algo == 'macpo':
         from safepo.multi_agent.macpo import Runner
@@ -133,8 +137,8 @@ def eval_multi_agent(eval_dir, eval_episodes):
 
 
 def single_runs_eval(eval_dir, eval_episodes):
-
-    config_path = eval_dir + '/config.json'
+    config_path = os.path.join(eval_dir, 'config.json')
+    # config_path = eval_dir + '/config.json'
     config = json.load(open(config_path, 'r'))
     env = config['task'] if 'task' in config.keys() else config['env_name']
     if env in multi_agent_velocity_map.keys() or env in multi_agent_goal_tasks:
@@ -153,6 +157,7 @@ def benchmark_eval():
     args = parser.parse_args()
 
     benchmark_dir = args.benchmark_dir
+    print("Benchmark directory:", benchmark_dir)
     eval_episodes = args.eval_episodes
     if args.save_dir is not None:
         save_dir = args.save_dir
@@ -174,7 +179,9 @@ def benchmark_eval():
                 reward, cost = single_runs_eval(seed_path, eval_episodes)
                 rewards.append(reward)
                 costs.append(cost)
-            output_file = open(f"{save_dir}/eval_result.txt", 'a')
+            output_file_path = os.path.join(save_dir, 'eval_result.txt')
+            output_file = open(output_file_path, 'a')
+            # output_file = open(f"{save_dir}/eval_result.txt", 'a')
             # two wise after point
             reward_mean = round(np.mean(rewards), 2)
             reward_std = round(np.std(rewards), 2)

@@ -1,3 +1,4 @@
+import sys
 import argparse
 import shlex
 import subprocess
@@ -92,7 +93,7 @@ if __name__ == "__main__":
                 commands += [
                     " ".join(
                         [
-                            f"python {algo}.py",
+                            f'"{sys.executable}" {algo}.py',
                             "--task",
                             task,
                             "--seed",

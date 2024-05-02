@@ -135,22 +135,24 @@ class Logger:
         )
         atexit.register(self.output_file.close)
         self._csv_writer = csv.writer(self.output_file)
-
         self.epoch = 0
         self.first_row = True
         self.log_headers = []
         self.log_current_row = {}
+        # Assuming 'log_dir' is your directory path
+        path_parts = log_dir.split(os.sep)  # os.sep provides the correct path separator based on the operating system
         self.exp_name = "-".join(
-            [log_dir.split("/")[-3], log_dir.split("/")[-2], "seed", seed]
+            [path_parts[-3], path_parts[-2], "seed", seed]
         )
+        # self.exp_name = "-".join(
+        #     [log_dir.split("/")[-3], log_dir.split("/")[-2], "seed", seed]
+        # )
         self.torch_saver_elements = None
         self.use_tensorboard = use_tensorboard
         self.logged = True
-
         # Setup tensor board logging if enabled and MPI root process
         if use_tensorboard:
             self.summary_writer = SummaryWriter(os.path.join(self.log_dir, "tb"))
-
     def close(self):
         """Close the output file.
         """
@@ -211,8 +213,15 @@ class Logger:
         output = json.dumps(
             config_json, separators=(",", ":\t"), indent=4, sort_keys=True
         )
-        with open(osp.join(self.log_dir, "config.json"), "w") as out:
-            out.write(output)
+        config_file_path = os.path.join(self.log_dir, "config.json")
+        try:
+            with open(config_file_path, "w") as out:
+                out.write(output)
+                print("config found")
+            self.log(f"Configuration saved to {config_file_path}")
+        except FileNotFoundError:
+            self.log(f"Error: Configuration file {config_file_path} not found.")
+            print("config file not found")
 
     def save_state(self, state_dict, itr=None):
         """
@@ -229,6 +238,9 @@ class Logger:
             None
         """
         fname = "state.pkl" if itr is None else "state%d.pkl" % itr
+        print("printing log_dir and fname")
+        print(osp.join(self.log_dir, fname))
+        self.log(osp.join(self.log_dir, fname))
         try:
             joblib.dump(state_dict, osp.join(self.log_dir, fname))
         except:

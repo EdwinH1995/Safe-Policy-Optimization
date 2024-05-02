@@ -17,6 +17,42 @@
 from __future__ import annotations
 
 import os
+import sys
+import pkg_resources
+
+# Diagnostic checks
+print("Current working directory:", os.getcwd())
+print("Python executable:", sys.executable)
+print("Python sys.path:", sys.path)
+
+if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+    print("Running in a virtual environment")
+else:
+    print("Not running in a virtual environment")
+
+print("Environment variables:")
+for key, value in os.environ.items():
+    print(f"{key}: {value}")
+
+# Check installed packages
+installed_packages = {d.project_name: d.version for d in pkg_resources.working_set}
+print("Installed packages:")
+for name, version in installed_packages.items():
+    print(name, version)
+
+# Test import another module
+try:
+    import numpy
+    print("Numpy imported successfully, version:", numpy.__version__)
+except ImportError:
+    print("Numpy is not available")
+
+# Now try importing safepo
+try:
+    import safepo
+    print("safepo imported successfully.")
+except ImportError as e:
+    print("Failed to import safepo:", str(e))
 import random
 import sys
 import time

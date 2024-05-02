@@ -65,14 +65,16 @@ isaac_gym_specific_cfg = {
 }
 
 def main(args, cfg_env=None):
+    print("test print main 0")
     # set the random seed, device and number of threads
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = True
     torch.set_num_threads(4)
+    print("test print main 1")
     device = torch.device(f'{args.device}:{args.device_id}')
-
+    print("test print main 2")
 
     if args.task not in isaac_gym_map.keys():
         env, obs_space, act_space = make_sa_mujoco_env(
@@ -130,21 +132,25 @@ def main(args, cfg_env=None):
         cost_limit=args.cost_limit,
         lagrangian_multiplier_init=args.lagrangian_multiplier_init,
     )
-
+    print("test setting up logger")
     # set up the logger
     dict_args = vars(args)
     dict_args.update(config)
+    print("Log directory is going to be set to:", args.log_dir)
     logger = EpochLogger(
         log_dir=args.log_dir,
         seed=str(args.seed),
     )
+    print("just defined logger")
     rew_deque = deque(maxlen=50)
     cost_deque = deque(maxlen=50)
     len_deque = deque(maxlen=50)
     eval_rew_deque = deque(maxlen=50)
     eval_cost_deque = deque(maxlen=50)
     eval_len_deque = deque(maxlen=50)
+    print("going to save config")
     logger.save_config(dict_args)
+    print("saving config from cppo_pid.py")
     logger.setup_torch_saver(policy.actor)
     logger.log("Start with training.")
     obs, _ = env.reset()
@@ -155,7 +161,9 @@ def main(args, cfg_env=None):
         np.zeros(args.num_envs),
     )
     # training loop
+    print("starting {} epochs".format(epochs))
     for epoch in range(epochs):
+        logger.log("starting an epoch")
         rollout_start_time = time.time()
         # collect samples until we have enough to update
         for steps in range(local_steps_per_epoch):
@@ -234,7 +242,6 @@ def main(args, cfg_env=None):
         rollout_end_time = time.time()
 
         eval_start_time = time.time()
-
         eval_episodes = 1 if epoch < epochs - 1 else 10
         if args.use_eval:
             for _ in range(eval_episodes):
@@ -270,7 +277,6 @@ def main(args, cfg_env=None):
         # update lagrange multiplier
         ep_costs = logger.get_stats("Metrics/EpCost")
         lagrange.update_lagrange_multiplier(ep_costs)
-
         # update policy
         data = buffer.get()
         old_distribution = policy.actor(data["obs"])

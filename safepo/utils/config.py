@@ -170,6 +170,11 @@ def single_agent_args():
     # Parse arguments
 
     args = parser.parse_args()
+    # Normalize the log directory path
+    args.log_dir = os.path.normpath(args.log_dir)
+    # Print the log directory
+    print("Log directory is set to:", args.log_dir)
+
     cfg_env={}
     base_path = os.path.dirname(os.path.abspath(__file__)).replace("utils", "multi_agent")
     if args.task in isaac_gym_map.keys():
@@ -179,7 +184,9 @@ def single_agent_args():
             raise Exception("Please install isaacgym to run Isaac Gym tasks!")
         args = gymutil.parse_arguments(description="RL Policy", custom_parameters=issac_parameters)
         args.device = args.sim_device_type if args.use_gpu_pipeline else 'cpu'
-        cfg_env_path = "marl_cfg/{}.yaml".format(isaac_gym_map[args.task])
+        cfg_env_name = isaac_gym_map[args.task]
+        cfg_env_path = os.path.join("marl_cfg", "{}.yaml".format(cfg_env_name))
+        # cfg_env_path = "marl_cfg/{}.yaml".format(isaac_gym_map[args.task])
         with open(os.path.join(base_path, cfg_env_path), 'r') as f:
             cfg_env = yaml.load(f, Loader=yaml.SafeLoader)
             cfg_env["name"] = args.task
@@ -229,7 +236,8 @@ def multi_agent_args(algo):
             raise Exception("Please install isaacgym to run Isaac Gym tasks!")
         args = gymutil.parse_arguments(description="RL Policy", custom_parameters=issac_parameters)
         args.device = args.sim_device_type if args.use_gpu_pipeline else 'cpu'
-    cfg_train_path = "marl_cfg/{}/config.yaml".format(algo)
+    cfg_train_path = os.path.join("marl_cfg", algo, "config.yaml")
+    # cfg_train_path = "marl_cfg/{}/config.yaml".format(algo)
     base_path = os.path.dirname(os.path.abspath(__file__)).replace("utils", "multi_agent")
     with open(os.path.join(base_path, cfg_train_path), 'r') as f:
         cfg_train = yaml.load(f, Loader=yaml.SafeLoader)
@@ -255,10 +263,13 @@ def multi_agent_args(algo):
     relpath = time.strftime("%Y-%m-%d-%H-%M-%S")
     subfolder = "-".join(["seed", str(args.seed).zfill(3)])
     relpath = "-".join([subfolder, relpath])
-    cfg_train['log_dir']="../runs/"+args.experiment+'/'+args.task+'/'+algo+'/'+relpath
+    cfg_train['log_dir'] = os.path.join("..", "runs", args.experiment, args.task, algo, relpath)
+    # cfg_train['log_dir']="../runs/"+args.experiment+'/'+args.task+'/'+algo+'/'+relpath
     cfg_env={}
     if args.task in isaac_gym_map.keys():
-        cfg_env_path = "marl_cfg/{}.yaml".format(isaac_gym_map[args.task])
+        cfg_env_name = isaac_gym_map[args.task]
+        cfg_env_path = os.path.join("marl_cfg", "{}.yaml".format(cfg_env_name))
+        # cfg_env_path = "marl_cfg/{}.yaml".format(isaac_gym_map[args.task])
         with open(os.path.join(base_path, cfg_env_path), 'r') as f:
             cfg_env = yaml.load(f, Loader=yaml.SafeLoader)
             cfg_env["name"] = args.task
