@@ -39,6 +39,7 @@ from safepo.common.env import make_sa_mujoco_env, make_sa_isaac_env
 from safepo.common.logger import EpochLogger
 from safepo.common.model import ActorVCritic
 from safepo.common.model import LyapunovFunction
+from safepo.common.model import DeltaLyapunovCritic
 from safepo.utils.config import single_agent_args, isaac_gym_map, parse_sim_params
 
 
@@ -118,6 +119,8 @@ def main(args, cfg_env=None):
     #Initializing Lyapunov module
     lyapunov_function = LyapunovFunction(obs_space.shape[0]).to(device)
     lyapunov_optimizer = torch.optim.Adam(lyapunov_function.parameters(), lr=3e-4)
+    #Initializing MSE Loss
+    mse_loss = nn.MSELoss()
     # create the vectorized on-policy buffer
     buffer = VectorizedOnPolicyBuffer(
         obs_space=obs_space,
@@ -130,7 +133,8 @@ def main(args, cfg_env=None):
     #Set the lyapunov limits
     lyapunov_threshold = args.cost_limit  # or some predefined safety threshold
     lyapunov_initial_penalty_scale = 10  # Penalty scale for initial state violations
-    lyapunov_lagrangian_coefficients = lyapunov_initial_penalty_scale
+    #set up lamba_lyapunov
+    lambda_lyapunov=0.995
     # set up the logger
     dict_args = vars(args)
     dict_args.update(config)
@@ -155,12 +159,16 @@ def main(args, cfg_env=None):
         np.zeros(args.num_envs),
     )
     # training loop
+    is_start = torch.ones(args.num_envs, dtype=torch.bool, device=device)
+    terminate = torch.zeros(args.num_envs, dtype=torch.bool, device=device)
     lagrange_coefficient_lol=0.0
     lagrange_update=0.0
+    current_step_int=0
     for epoch in range(epochs):
+        #obs,_= env.reset()
+        #obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
+        terminate_test=[]
         rollout_start_time = time.time()
-        is_start = torch.ones(args.num_envs, dtype=torch.bool, device=device)
-        terminate = torch.zeros(args.num_envs, dtype=torch.bool, device=device)
         # collect samples until we have enough to update
         for steps in range(local_steps_per_epoch):
             with torch.no_grad():
@@ -194,6 +202,12 @@ def main(args, cfg_env=None):
                 lyapunov_current = lyapunov_current.expand(args.num_envs)  # Expand to match the batch size
             if lyapunov_next.dim() == 0:  # It's a scalar tensor
                 lyapunov_next = lyapunov_next.expand(args.num_envs)  # Expand to match the batch size
+            current_step = torch.full((args.num_envs,), current_step_int, dtype=torch.int, device=device)
+            terminate=((terminated.clone()) > 0.) | ((truncated.clone()) > 0.)
+            if terminated.item()>0. or truncated.item()>0.:
+                terminate_test.append(steps)
+            #print("terminated",terminated)
+            #print("truncated",truncated)
             buffer.store(
                 obs=obs,
                 act=act,
@@ -206,10 +220,13 @@ def main(args, cfg_env=None):
                 lyapunov_current=lyapunov_current,
                 lyapunov_next=lyapunov_next,
                 is_start=is_start,
-                terminate=terminate
+                terminate=terminate,
+                current_step=current_step
             )
+            current_step_int+=1
+            if terminate.item():
+                current_step_int=0
             is_start=terminate.clone()
-            terminate=terminated.clone() > 0
             obs = next_obs
             epoch_end = steps >= local_steps_per_epoch - 1
             for idx, (done, time_out) in enumerate(zip(terminated, truncated)):
@@ -293,7 +310,6 @@ def main(args, cfg_env=None):
 
         # comnpute advantage
         advantage = data["adv_r"]
-
         dataloader = DataLoader(
             dataset=TensorDataset(
                 data["obs"],
@@ -307,7 +323,8 @@ def main(args, cfg_env=None):
                 data["lyapunov_current"],
                 data["lyapunov_next"],
                 data["is_start"],
-                data["terminate"]
+                data["terminate"],
+                data["current_step"]
             ),
             batch_size=config.get("batch_size", args.steps_per_epoch//config.get("num_mini_batch", 1)),
             shuffle=True,
@@ -315,11 +332,12 @@ def main(args, cfg_env=None):
         update_counts = 0
         final_kl = torch.ones_like(old_distribution.loc)
         lambda_penalty = 10  # Coefficient for Lyapunov penalty
-        total_loss_sum=0
+        total_loss_sum=0.
+        total_loss_sum_positive=0.
         epsilon=10
         gamma = config['gamma']  # Discount factor from your config
-        lagrange_coefficient_lol=lagrange_update
         mean_lyapunov_initial_penalty_sum=0.0
+        start_states=0
         for _ in range(config["learning_iters"]):
             for (
                 obs_b,
@@ -333,7 +351,8 @@ def main(args, cfg_env=None):
                 lyapunov_current_b,
                 lyapunov_next_b,
                 is_start_b,
-                terminate_b
+                terminate_b,
+                current_step_b
             ) in dataloader:
                 #zeroing gradients for the optimizer
                 reward_critic_optimizer.zero_grad()
@@ -357,6 +376,33 @@ def main(args, cfg_env=None):
                 total_lyapunov_loss = torch.zeros(1, device=obs_b.device)
                 #lyapunov_current_b=lyapunov_current_b.detach()
                 #lyapunov_next_b=lyapunov_next_b.detach()
+
+                while ((torch.relu(target_value_c_b-0.1-lyapunov_function(obs_b).detach()))>0.).any():
+                    lyapunov_current_prelim = lyapunov_function(obs_b)
+                    loss_c_lyapunov=(torch.relu(target_value_c_b-lyapunov_current_prelim)).mean()*1000
+                    for name, param in lyapunov_function.named_parameters():
+                        print(f"{name} requires grad: {param.requires_grad}")
+                    print("Condition:", ((torch.relu(target_value_c_b-0.1-lyapunov_current_prelim))>0.))
+                    print("Does loss require gradients?:", loss_c_lyapunov.requires_grad)
+                    print("lyapunov_current_prelim",lyapunov_current_prelim)
+                    print("lyapunov_mse_loss", loss_c_lyapunov)
+                    print("target_value_c_b",target_value_c_b)
+                    for name, param in lyapunov_function.named_parameters():
+                        if param.grad is not None:
+                            print(f"Gradients before zeroing - {name}: {param.grad}")
+                    lyapunov_optimizer.zero_grad()
+                    for name, param in lyapunov_function.named_parameters():
+                        if param.grad is not None:
+                            print(f"Gradients before zeroing - {name}: {param.grad}")
+                    loss_c_lyapunov.backward()
+                    lyapunov_optimizer.step()
+                    for name, param in lyapunov_function.named_parameters():
+                        if param.grad is not None:
+                            print(f"Gradients before zeroing - {name}: {param.grad}")
+                    print("lyapunov_current_prelim",lyapunov_current_prelim)
+
+                lyapunov_optimizer.zero_grad()
+
                 lyapunov_current = lyapunov_function(obs_b)
                 lyapunov_next = lyapunov_function(next_obs_b)
                 """ if active_mask.any():
@@ -372,36 +418,32 @@ def main(args, cfg_env=None):
                     clipped_ratio_current = torch.clamp(ratio_current, 1-epsilon, 1+epsilon)
                     clipped_current = clipped_ratio_current * lyapunov_current_b
                     print("lyapunov_current:",lyapunov_current)
-                    print("lyapunov_current_b:",lyapunov_current)
+                    print("lyapunov_current_b:",lyapunov_current_b)
                     print("ratio_current",ratio_current)
         
                     ratio_next = (lyapunov_next+0.1) / (lyapunov_next_b+0.1)
                     clipped_ratio_next = torch.clamp(ratio_next, 1-epsilon, 1+epsilon)
                     clipped_next = clipped_ratio_next * lyapunov_next_b
+                    print("lyapunov_next:",lyapunov_next)
+                    print("lyapunov_next_b:",lyapunov_next_b)
                     print("ratio_next",ratio_current)
+                    print("cost_b",cost_b)
                     #Calculate clipping penalty
                     penalty_current = torch.relu(torch.abs(ratio_current - 1) - epsilon) * torch.abs(lyapunov_current_b+0.1)-0.1
                     penalty_next = torch.relu(torch.abs(ratio_next - 1) - epsilon) * torch.abs(lyapunov_next_b+0.1)-0.1
                     #Calculate clipped delta loss
-                    delta_lyapunov = cost_b + gamma * lyapunov_next - lyapunov_current #+ penalty_current + penalty_next
+                    delta_lyapunov = (cost_b + gamma * lyapunov_next - lyapunov_current)*torch.pow(lambda_lyapunov, current_step_b) #+ penalty_current + penalty_next
                     #delta_lyapunov = cost_b + gamma * clipped_next - clipped_current #+ penalty_current + penalty_next
+                    print("current_step_b:",current_step_b)
+                    print("current_step_b_power:",torch.pow(lambda_lyapunov, current_step_b))
                     print('delta_lyapunov:',delta_lyapunov)
-                    delta_lyapunov_times_ratio_b=(cost_b+gamma*lyapunov_next_b-lyapunov_current_b)[active_mask]
-                    print("vo")
+                    delta_lyapunov_times_ratio_b=((cost_b+gamma*lyapunov_next_b-lyapunov_current_b)[active_mask])*(torch.pow(lambda_lyapunov, current_step_b)[active_mask])
                     delta_lyapunov_times_ratio=(delta_lyapunov* ratio_cliped)[active_mask]
                     print('delta_lyapunov_times_ratio_b:',delta_lyapunov_times_ratio_b)
                     #Calculate total Lyapunov loss
                     lyapunov_loss_b=delta_lyapunov_times_ratio_b.mean()
                     lyapunov_loss= delta_lyapunov_times_ratio.mean()
-                    if lyapunov_loss>0:
-                        total_lyapunov_loss = 5*lyapunov_loss #+ penalty_current.mean() + penalty_next.mean()
-                    else:
-                        total_lyapunov_loss=0.5*lyapunov_loss
-                else:
-                    print("All states were terminated")
-                    total_lyapunov_loss=0.0
-                    lyapunov_loss_b=0.0
-                    total_lyapunov_loss=0.0
+                    total_lyapunov_loss = lyapunov_loss #+ penalty_current.mean() + penalty_next.mean()
                 # Apply additional penalty if the state is initial and Lyapunov is too high
                 #initial_lyapunov_penalty = torch.zeros_like(lyapunov_current)
                 if is_start_b.any():
@@ -410,6 +452,7 @@ def main(args, cfg_env=None):
                     print("initial_lyapunov_divergence", initial_lyapunov_divergence)
                     mean_initial_lyapunov_penalty=torch.relu(torch.nanmean(initial_lyapunov_divergence))
                     mean_lyapunov_initial_penalty_sum+=torch.nanmean(initial_lyapunov_divergence_b)
+                    start_states+=1
                 else:
                     mean_initial_lyapunov_penalty=0.0
 
@@ -420,33 +463,31 @@ def main(args, cfg_env=None):
                 #initial_lyapunov_penalty = torch.zeros_like(lyapunov_current)
                 #initial_condition_violation = (lyapunov_current > lyapunov_threshold) & is_start_b
                 #initial_lyapunov_penalty[initial_condition_violation] = lyapunov_initial_penalty_scale * (lyapunov_current[initial_condition_violation] - lyapunov_threshold)
+                
+                #printing stuff
+
                 total_loss_sum+=lyapunov_loss_b
+                if lyapunov_loss_b>0.0:
+                    total_loss_sum_positive+=lyapunov_loss_b
+                print("lyapunov_loss_b",lyapunov_loss_b)
                 print("lyapunov_current.mean()",lyapunov_current_b.mean())
                 print("lyapunov_next.mean()",lyapunov_next_b.mean())
-                print("lyapunov_loss_b",lyapunov_loss_b)
                 print("total_lyapunov_loss:",total_lyapunov_loss)
                 print("is_start_b",is_start_b)
                 print("loss pi:",loss_pi)
                 print("total_lyapunov_sum:", total_loss_sum)
                 print("Mean Initial Lyapunov Penalty:", mean_initial_lyapunov_penalty)
-                print("Mean Initial Lyapunov Penalty Sum:", mean_lyapunov_initial_penalty_sum)
+                print("Mean Initial Lyapunov Penalty Mean:", mean_lyapunov_initial_penalty_sum/(start_states+0.01))
                 print("lagrange:",lagrange_coefficient_lol)
-                #computing total loss
-                if lagrange_update>-1.0:
-                    lagrange_update+=(lyapunov_loss_b).detach().item()
+                if total_lyapunov_loss>0.:
+                    total_loss = 2*loss_r + loss_c + total_lyapunov_loss + mean_initial_lyapunov_penalty \
+                        if config.get("use_value_coefficient", False) \
+                        else loss_r + loss_c + total_lyapunov_loss + mean_initial_lyapunov_penalty
                 else:
-                    if (lyapunov_loss_b).detach().item()>0:
-                        lagrange_update+=(lyapunov_loss_b).detach().item()
-                total_loss = loss_pi + 2*loss_r + loss_c + max(lagrange_coefficient_lol,0.0)*total_lyapunov_loss + mean_initial_lyapunov_penalty\
-                    if config.get("use_value_coefficient", False) \
-                    else loss_pi + loss_r + loss_c + max(lagrange_coefficient_lol,0.0)*total_lyapunov_loss + mean_initial_lyapunov_penalty
-                #total_loss/=(2+lagrange_coefficient_lol)
-                print("Before backward: total_loss", total_loss.requires_grad)  # Should be True
-                print("Before backward: total_loss", lyapunov_current.requires_grad)  # Should be True
-                print("Before backward - checking gradients:")
-                for name, param in lyapunov_function.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} gradient: {param.grad}")
+                    total_loss = loss_pi+2*loss_r + loss_c + mean_initial_lyapunov_penalty \
+                        if config.get("use_value_coefficient", False) \
+                        else loss_pi+ loss_r + loss_c + mean_initial_lyapunov_penalty
+                #total_loss/=(2+lagrange_coefficient)
                 """ print("Before backward - checking gradients:")
                     for name, param in lyapunov_function.named_parameters():
                     if param.requires_grad:
@@ -519,6 +560,7 @@ def main(args, cfg_env=None):
                 break
         update_end_time = time.time()
         actor_scheduler.step()
+        print("terminate_test:",terminate_test)
         if not logger.logged:
             # log data
             logger.log_tabular("Metrics/EpRet")

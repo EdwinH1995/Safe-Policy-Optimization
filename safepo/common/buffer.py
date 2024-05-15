@@ -68,6 +68,15 @@ class VectorizedOnPolicyBuffer:
                 "target_value_r": torch.zeros(size, dtype=torch.float32, device=device),
                 "target_value_c": torch.zeros(size, dtype=torch.float32, device=device),
                 "log_prob": torch.zeros(size, dtype=torch.float32, device=device),
+                "next_obs": torch.zeros(
+                    (size, *obs_space.shape), dtype=torch.float32, device=device
+                ), # Added next obs
+                "lyapunov_current": torch.zeros(size, dtype=torch.float32, device=device),  # Added Lyapunov storage
+                "lyapunov_next": torch.zeros(size, dtype=torch.float32, device=device),  # Added Lyapunov storage
+                "is_start": torch.zeros(size, dtype=torch.bool, device=device), #Added initial state flag
+                "terminate": torch.zeros(size, dtype=torch.bool, device=device), #Added terminal state flag
+                "delta_lyapunov": torch.zeros(size, dtype=torch.float32, device=device),  # Added Delta Lyapunov storage
+                "current_step": torch.zeros(size, dtype=torch.int, device=device), #Added current step storage
             }
             for _ in range(num_envs)
         ]
@@ -90,6 +99,9 @@ class VectorizedOnPolicyBuffer:
         """
         for i, buffer in enumerate(self.buffers):
             assert self.ptr_list[i] < buffer["obs"].shape[0], "Buffer overflow"
+            # print(f"Storing data at index {self.ptr_list[i]} for buffer {i}")
+            #for key, value in data.items():
+                # print(f"Key: {key}, Value shape: {value.shape}, Buffer expected shape: {buffer[key].shape}")
             for key, value in data.items():
                 buffer[key][self.ptr_list[i]] = value[i]
             self.ptr_list[i] += 1

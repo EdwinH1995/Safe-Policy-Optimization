@@ -47,7 +47,6 @@ def build_mlp_network(sizes):
         layers += [affine_layer, act()]
     return nn.Sequential(*layers)
 
-
 class Actor(nn.Module):
     """
     Actor network for policy-based reinforcement learning.
@@ -79,7 +78,77 @@ class Actor(nn.Module):
         mean = self.mean(obs)
         std = torch.exp(self.log_std)
         return Normal(mean, std)
+    
+def build_mlp_network_relu(sizes):
+    """
+    Build a multi-layer perceptron (MLP) neural network.
 
+    This function constructs an MLP network with the specified layer sizes and activation functions.
+
+    Args:
+        sizes (list of int): List of integers representing the sizes of each layer in the network.
+
+    Returns:
+        nn.Sequential: An instance of PyTorch's Sequential module representing the constructed MLP.
+    """
+    layers = list()
+    for j in range(len(sizes) - 1):
+        act = nn.Tanh if j < len(sizes) - 2 else nn.Identity
+        affine_layer = nn.Linear(sizes[j], sizes[j + 1])
+        nn.init.kaiming_uniform_(affine_layer.weight, a=np.sqrt(5))
+        layers += [affine_layer, act()]
+    return nn.Sequential(*layers)
+
+class LyapunovFunction(nn.Module):
+    """
+    Lyapunov function network for estimating state safety.
+
+    Args:
+        obs_dim (int): Dimensionality of the observation space.
+        hidden_sizes (list of int): Sizes of hidden layers.
+        max_lyapunov_value: 
+    Attributes:
+        network (nn.Sequential): MLP network representing the Lyapunov function.
+    """
+    #def __init__(self, obs_dim, hidden_sizes=[64, 64], max_lyapunov_value=10.0):
+        #super().__init__()
+        #self.network = build_mlp_network([obs_dim] + hidden_sizes + [1])
+        #self.max_lyapunov_value = max_lyapunov_value  # Maximum value Lyapunov function can output
+        #self.scale= nn.Parameter(torch.ones(1))
+    def __init__(self, obs_dim, hidden_sizes=[64, 64], gamma=0.99):
+        super().__init__()
+        # Use the existing build_mlp_network function to construct the network
+        self.network = build_mlp_network_relu([obs_dim] + hidden_sizes + [1])
+
+    def forward(self, obs):
+        output = self.network(obs)
+        output = torch.squeeze(output)
+        return output
+
+
+class DeltaLyapunovCritic(nn.Module):
+    """
+    Lyapunov function network for estimating state safety.
+
+    Args:
+        obs_dim (int): Dimensionality of the observation space.
+        hidden_sizes (list of int): Sizes of hidden layers.
+        max_lyapunov_value: 
+    Attributes:
+        network (nn.Sequential): MLP network representing the Lyapunov function.
+    """
+    #def __init__(self, obs_dim, hidden_sizes=[64, 64], max_lyapunov_value=10.0):
+        #super().__init__()
+        #self.network = build_mlp_network([obs_dim] + hidden_sizes + [1])
+        #self.max_lyapunov_value = max_lyapunov_value  # Maximum value Lyapunov function can output
+        #self.scale= nn.Parameter(torch.ones(1))
+    def __init__(self, obs_dim, hidden_sizes: list = [64, 64], gamma=0.99):
+        super().__init__()
+        self.network = build_mlp_network([obs_dim]+hidden_sizes+[1])
+
+    def forward(self, obs):
+        return torch.squeeze(self.network(obs))
+    
 
 class VCritic(nn.Module):
     """

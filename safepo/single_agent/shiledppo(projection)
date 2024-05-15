@@ -129,8 +129,6 @@ def main(args, cfg_env=None):
     )
     #Set the lyapunov limits
     lyapunov_threshold = args.cost_limit  # or some predefined safety threshold
-    lyapunov_initial_penalty_scale = 10  # Penalty scale for initial state violations
-    lyapunov_lagrangian_coefficients = lyapunov_initial_penalty_scale
     # set up the logger
     dict_args = vars(args)
     dict_args.update(config)
@@ -147,7 +145,7 @@ def main(args, cfg_env=None):
     logger.save_config(dict_args)
     logger.setup_torch_saver(policy.actor)
     logger.log("Start with training.")
-    obs,_= env.reset()
+    obs, _ = env.reset()
     obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
     ep_ret, ep_cost, ep_len = (
         np.zeros(args.num_envs),
@@ -155,7 +153,7 @@ def main(args, cfg_env=None):
         np.zeros(args.num_envs),
     )
     # training loop
-    lagrange_coefficient_lol=0.0
+    lagrange=0.0
     lagrange_update=0.0
     for epoch in range(epochs):
         rollout_start_time = time.time()
@@ -187,13 +185,11 @@ def main(args, cfg_env=None):
                     dtype=torch.float32,
                     device=device,
                 )
-            with torch.no_grad():
-                lyapunov_current=lyapunov_function(obs)
-                lyapunov_next=lyapunov_function(next_obs)
-            if lyapunov_current.dim() == 0:  # It's a scalar tensor
-                lyapunov_current = lyapunov_current.expand(args.num_envs)  # Expand to match the batch size
-            if lyapunov_next.dim() == 0:  # It's a scalar tensor
-                lyapunov_next = lyapunov_next.expand(args.num_envs)  # Expand to match the batch size
+            lyapunov_current=lyapunov_function(obs)
+            lyapunov_next=lyapunov_function(next_obs)
+            # print("Terminated type:", terminated.dtype)
+            # print("Terminate type:", terminate.dtype)
+            # print(f"obs shape: {obs.shape}, act shape: {act.shape}, reward shape: {reward.shape}, lyapunov shape: {lyapunov_current.shape},terminate shape: {terminate.shape}")
             buffer.store(
                 obs=obs,
                 act=act,
@@ -316,10 +312,10 @@ def main(args, cfg_env=None):
         final_kl = torch.ones_like(old_distribution.loc)
         lambda_penalty = 10  # Coefficient for Lyapunov penalty
         total_loss_sum=0
-        epsilon=10
+        epsilon=0.2
         gamma = config['gamma']  # Discount factor from your config
-        lagrange_coefficient_lol=lagrange_update
-        mean_lyapunov_initial_penalty_sum=0.0
+        mean_lyapunov_initial_penalty_sum=0
+        lagrange=lagrange_update
         for _ in range(config["learning_iters"]):
             for (
                 obs_b,
@@ -335,6 +331,24 @@ def main(args, cfg_env=None):
                 is_start_b,
                 terminate_b
             ) in dataloader:
+                with torch.no_grad():
+                    dist = policy.actor(obs_b)
+                    action = dist.rsample()
+                    log_prob = dist.log_prob(action).sum(axis=-1)
+                    value_r = self.reward_critic(obs)
+                    value_c = self.cost_critic(obs)
+                with torch.no_grad():
+                    act, log_prob, value_r, value_c = policy.step(obs_b, deterministic=False)
+                action = act.detach().squeeze() if args.task in isaac_gym_map.keys() else act.detach().squeeze().cpu().numpy()
+                next_obs, reward, cost, terminated, truncated, info = env.step(action)
+
+                ep_ret += reward.cpu().numpy() if args.task in isaac_gym_map.keys() else reward
+                ep_cost += cost.cpu().numpy() if args.task in isaac_gym_map.keys() else cost
+                ep_len += 1
+                next_obs, reward, cost, terminated, truncated = (
+                torch.as_tensor(x, dtype=torch.float32, device=device)
+                for x in (next_obs, reward, cost, terminated, truncated)
+            )
                 #zeroing gradients for the optimizer
                 reward_critic_optimizer.zero_grad()
                 loss_r = nn.functional.mse_loss(policy.reward_critic(obs_b), target_value_r_b)
@@ -355,10 +369,11 @@ def main(args, cfg_env=None):
                 loss_pi = -torch.min(ratio * adv_b, ratio_cliped * adv_b).mean()
                 active_mask = ~terminate_b  # True for non-terminated states
                 total_lyapunov_loss = torch.zeros(1, device=obs_b.device)
-                #lyapunov_current_b=lyapunov_current_b.detach()
-                #lyapunov_next_b=lyapunov_next_b.detach()
+                lyapunov_current_b=lyapunov_current_b.detach()
+                lyapunov_next_b=lyapunov_next_b.detach()
                 lyapunov_current = lyapunov_function(obs_b)
                 lyapunov_next = lyapunov_function(next_obs_b)
+                lagrange=lagrange
                 """ if active_mask.any():
                     ratio_current = lyapunov_current / lyapunov_current_b
                     clipped_ratio_current = torch.clamp(ratio_current, 1-epsilon, 1+epsilon)
@@ -368,79 +383,50 @@ def main(args, cfg_env=None):
                 total_lyapunov_loss = torch.relu(delta_lyapunov_masked.mean()) """
                 if active_mask.any():
                     # Calculate ratios and apply clipping
-                    ratio_current = (lyapunov_current+0.1) / (lyapunov_current_b+0.1)
+                    ratio_current = lyapunov_current / lyapunov_current_b
                     clipped_ratio_current = torch.clamp(ratio_current, 1-epsilon, 1+epsilon)
                     clipped_current = clipped_ratio_current * lyapunov_current_b
-                    print("lyapunov_current:",lyapunov_current)
-                    print("lyapunov_current_b:",lyapunov_current)
-                    print("ratio_current",ratio_current)
         
-                    ratio_next = (lyapunov_next+0.1) / (lyapunov_next_b+0.1)
+                    ratio_next = lyapunov_next / lyapunov_next_b
                     clipped_ratio_next = torch.clamp(ratio_next, 1-epsilon, 1+epsilon)
                     clipped_next = clipped_ratio_next * lyapunov_next_b
-                    print("ratio_next",ratio_current)
                     #Calculate clipping penalty
-                    penalty_current = torch.relu(torch.abs(ratio_current - 1) - epsilon) * torch.abs(lyapunov_current_b+0.1)-0.1
-                    penalty_next = torch.relu(torch.abs(ratio_next - 1) - epsilon) * torch.abs(lyapunov_next_b+0.1)-0.1
+                    penalty_current = torch.relu(torch.abs(clipped_ratio_current - 1) - epsilon) * torch.abs(lyapunov_current_b)
+                    penalty_next = torch.relu(torch.abs(clipped_ratio_next - 1) - epsilon) * torch.abs(lyapunov_next_b)
                     #Calculate clipped delta loss
-                    delta_lyapunov = cost_b + gamma * lyapunov_next - lyapunov_current #+ penalty_current + penalty_next
-                    #delta_lyapunov = cost_b + gamma * clipped_next - clipped_current #+ penalty_current + penalty_next
-                    print('delta_lyapunov:',delta_lyapunov)
-                    delta_lyapunov_times_ratio_b=(cost_b+gamma*lyapunov_next_b-lyapunov_current_b)[active_mask]
-                    print("vo")
+                    delta_lyapunov = cost_b + gamma * clipped_next - clipped_current #+ penalty_current + penalty_next
+                    delta_lyapunov_times_ratio_b=(cost_b+gamma*lyapunov_next_b-lyapunov_current_b)
                     delta_lyapunov_times_ratio=(delta_lyapunov* ratio_cliped)[active_mask]
-                    print('delta_lyapunov_times_ratio_b:',delta_lyapunov_times_ratio_b)
                     #Calculate total Lyapunov loss
                     lyapunov_loss_b=delta_lyapunov_times_ratio_b.mean()
-                    lyapunov_loss= delta_lyapunov_times_ratio.mean()
-                    if lyapunov_loss>0:
-                        total_lyapunov_loss = 5*lyapunov_loss #+ penalty_current.mean() + penalty_next.mean()
-                    else:
-                        total_lyapunov_loss=0.5*lyapunov_loss
-                else:
-                    print("All states were terminated")
-                    total_lyapunov_loss=0.0
-                    lyapunov_loss_b=0.0
-                    total_lyapunov_loss=0.0
+                    lyapunov_loss = delta_lyapunov_times_ratio.mean()
+                    total_lyapunov_loss = (lyapunov_loss+ penalty_current.mean() + penalty_next.mean())
                 # Apply additional penalty if the state is initial and Lyapunov is too high
                 #initial_lyapunov_penalty = torch.zeros_like(lyapunov_current)
-                if is_start_b.any():
-                    initial_lyapunov_divergence = torch.where(is_start_b, lyapunov_current - lyapunov_threshold, torch.tensor(float('nan'), device=lyapunov_current.device))
-                    initial_lyapunov_divergence_b = torch.where(is_start_b, lyapunov_current_b - lyapunov_threshold, torch.tensor(float('nan'), device=lyapunov_current_b.device))
-                    print("initial_lyapunov_divergence", initial_lyapunov_divergence)
-                    mean_initial_lyapunov_penalty=torch.relu(torch.nanmean(initial_lyapunov_divergence))
-                    mean_lyapunov_initial_penalty_sum+=torch.nanmean(initial_lyapunov_divergence_b)
-                else:
-                    mean_initial_lyapunov_penalty=0.0
-
+                initial_lyapunov_divergence = torch.where(is_start_b, lyapunov_current - lyapunov_threshold, torch.tensor(0.0, device=lyapunov_current.device))
+                initial_lyapunov_divergence_b = torch.where(is_start_b, lyapunov_current_b - lyapunov_threshold, torch.tensor(0.0, device=lyapunov_current_b.device))
                 #initial_lyapunov_divergence = torch.zeros_like(lyapunov_current)
                 #initial_lyapunov_divergence_b = torch.zeros_like(lyapunov_current)
-                #initial_lyapunov_divergence[is_start_b]=lyapunov_current[is_start_b] - lyapunov_threshold
-                #initial_lyapunov_divergence_b[is_start_b]=lyapunov_current_b[is_start_b] - lyapunov_threshold
+                initial_lyapunov_divergence[is_start_b]=lyapunov_current[is_start_b] - lyapunov_threshold
+                initial_lyapunov_divergence_b[is_start_b]=lyapunov_current_b[is_start_b] - lyapunov_threshold
                 #initial_lyapunov_penalty = torch.zeros_like(lyapunov_current)
                 #initial_condition_violation = (lyapunov_current > lyapunov_threshold) & is_start_b
                 #initial_lyapunov_penalty[initial_condition_violation] = lyapunov_initial_penalty_scale * (lyapunov_current[initial_condition_violation] - lyapunov_threshold)
-                total_loss_sum+=lyapunov_loss_b
-                print("lyapunov_current.mean()",lyapunov_current_b.mean())
-                print("lyapunov_next.mean()",lyapunov_next_b.mean())
-                print("lyapunov_loss_b",lyapunov_loss_b)
-                print("total_lyapunov_loss:",total_lyapunov_loss)
+                mean_initial_lyapunov_penalty=torch.relu(initial_lyapunov_divergence.mean())*torch.relu(initial_lyapunov_divergence_b.mean())
+                mean_lyapunov_initial_penalty_sum+=initial_lyapunov_divergence_b.mean()
+                total_loss_sum+=lyapunov_loss_b.mean()
                 print("is_start_b",is_start_b)
                 print("loss pi:",loss_pi)
+                print("total_lyapunov_loss:",total_lyapunov_loss)
                 print("total_lyapunov_sum:", total_loss_sum)
                 print("Mean Initial Lyapunov Penalty:", mean_initial_lyapunov_penalty)
                 print("Mean Initial Lyapunov Penalty Sum:", mean_lyapunov_initial_penalty_sum)
-                print("lagrange:",lagrange_coefficient_lol)
                 #computing total loss
-                if lagrange_update>-1.0:
-                    lagrange_update+=(lyapunov_loss_b).detach().item()
-                else:
-                    if (lyapunov_loss_b).detach().item()>0:
-                        lagrange_update+=(lyapunov_loss_b).detach().item()
-                total_loss = loss_pi + 2*loss_r + loss_c + max(lagrange_coefficient_lol,0.0)*total_lyapunov_loss + mean_initial_lyapunov_penalty\
+                lagrange_update+=total_loss_sum.detach()
+                total_loss = loss_pi + 2*loss_r + loss_c + lagrange*total_lyapunov_loss + mean_initial_lyapunov_penalty\
                     if config.get("use_value_coefficient", False) \
-                    else loss_pi + loss_r + loss_c + max(lagrange_coefficient_lol,0.0)*total_lyapunov_loss + mean_initial_lyapunov_penalty
-                #total_loss/=(2+lagrange_coefficient_lol)
+                    else loss_pi + loss_r + loss_c + total_lyapunov_loss + mean_initial_lyapunov_penalty
+                total_loss/=(1+torch.relu(lyapunov_loss_b)+torch.relu(initial_lyapunov_divergence_b.mean()))
                 print("Before backward: total_loss", total_loss.requires_grad)  # Should be True
                 print("Before backward: total_loss", lyapunov_current.requires_grad)  # Should be True
                 print("Before backward - checking gradients:")

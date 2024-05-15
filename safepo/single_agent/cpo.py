@@ -603,6 +603,7 @@ def main(args, cfg_env=None):
             if (epoch+1) % 100 == 0 or epoch == 0:
                 logger.torch_save(itr=epoch)
                 if args.task not in isaac_gym_map.keys():
+                    print("state_dict contents:", state_dict)
                     logger.save_state(
                         state_dict={
                             "Normalizer": env.obs_rms,
