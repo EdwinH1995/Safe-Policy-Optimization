@@ -149,6 +149,7 @@ def main(args, cfg_env=None):
     )
     #Set the lyapunov limits
     lyapunov_threshold = args.cost_limit  # or some predefined safety threshold
+    #lyapunov_threshold = 150
     lyapunov_initial_penalty_scale = 10  # Penalty scale for initial state violations
     lambda_lyapunov=0.98
     # set up the logger
@@ -184,9 +185,11 @@ def main(args, cfg_env=None):
         #obs,_= env.reset()
         #obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
         terminate_test=[]
+        is_start_test_2=[]
         rollout_start_time = time.time()
         delta_lyapunov_critic_copy.load_state_dict(delta_lyapunov_critic.state_dict())
         delta_lyapunov_critic_lag_copy.load_state_dict(delta_lyapunov_critic_lag.state_dict())
+        max_target_value_c=0.
         # collect samples until we have enough to update
         for steps in range(local_steps_per_epoch):
             with torch.no_grad():
@@ -227,6 +230,8 @@ def main(args, cfg_env=None):
             terminate=((terminated.clone()) > 0.) | ((truncated.clone()) > 0.)
             if terminated.item()>0. or truncated.item()>0.:
                 terminate_test.append(steps)
+            if is_start:
+                is_start_test_2.append(steps)
             #print("terminated",terminated)
             #print("truncated",truncated)
             buffer.store(
@@ -365,6 +370,7 @@ def main(args, cfg_env=None):
         start_is_1000_multiple=True
         start_witness=0
         number_of_redressments=0
+        is_start_test=[]
         for _ in range(config["learning_iters"]):
             for (
                 obs_b,
@@ -383,6 +389,7 @@ def main(args, cfg_env=None):
                 current_step_b
             ) in dataloader:
                 #zeroing gradients for the optimizer
+                max_target_value_c=max(torch.max(target_value_c_b),max_target_value_c)
                 reward_critic_optimizer.zero_grad()
                 loss_r = nn.functional.mse_loss(policy.reward_critic(obs_b), target_value_r_b)
                 cost_critic_optimizer.zero_grad()
@@ -407,7 +414,6 @@ def main(args, cfg_env=None):
                 total_lyapunov_loss = torch.zeros(1, device=obs_b.device)
                 #lyapunov_current_b=lyapunov_current_b.detach()
                 #lyapunov_next_b=lyapunov_next_b.detach()
-
                 while ((torch.relu(target_value_c_b-0.1-lyapunov_function(obs_b).detach()))>0.).any():
                     number_of_redressments+=1
                     lyapunov_current_prelim = lyapunov_function(obs_b)
@@ -427,7 +433,8 @@ def main(args, cfg_env=None):
 
                 lyapunov_current = lyapunov_function(obs_b[active_mask])
                 lyapunov_next = lyapunov_function(next_obs_b[active_mask])
-
+                lyapunov_current_b[is_start_b]=args.cost_limit
+                lyapunov_current[is_start_b[active_mask]]=args.cost_limit
                 """ if active_mask.any():
                     ratio_current = lyapunov_current / lyapunov_current_b
                     clipped_ratio_current = torch.clamp(ratio_current, 1-epsilon, 1+epsilon)
@@ -485,8 +492,6 @@ def main(args, cfg_env=None):
                     initial_target_value_c_mean += (policy.cost_critic(obs_b[is_start_b])).mean()
                     mean_initial_lyapunov_penalty=torch.relu(torch.nanmean(initial_lyapunov_divergence))
                     mean_lyapunov_initial_penalty_sum+=torch.nanmean(initial_lyapunov_divergence_b)
-                    if ((current_step_b[is_start_b]) % 1000).any():
-                        start_is_1000_multiple=False
                     start_states+=1
                 else:
                     mean_initial_lyapunov_penalty=0.0
@@ -539,11 +544,12 @@ def main(args, cfg_env=None):
                 lagrange_mask=(lagrange_coefficient>0) | (delta_lyapunov_critic_b>0)
                 """ print("lagrange_coefficient:",lagrange_coefficient)
                 print("lyapunov_loss",lyapunov_loss) """
-                total_lyapunov_loss = 10*((torch.max(lagrange_coefficient[lagrange_mask],delta_lyapunov_critic_b[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean())
+                total_lyapunov_loss = 100*((torch.max(lagrange_coefficient[lagrange_mask],delta_lyapunov_critic_b[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean())
                 #printing stuff
 
 
                 total_loss_sum+=lyapunov_loss_b
+                print("max_target_value_c:",max_target_value_c)
                 print("lagrange_coefficient:",lagrange_coefficient)
                 print("lagrange_coefficient_mean:",lagrange_coefficient.mean())
                 print("delta_lyapunov_critic_mean:",((delta_lyapunov_critic(obs_b[active_mask]))).mean())
@@ -561,14 +567,15 @@ def main(args, cfg_env=None):
                 print("start_witness",start_witness)
                 print("lagrange:",lagrange_coefficient_lol)
                 print("number_of_redressments",number_of_redressments)
+                print("is_start_test2",is_start_test_2)
                 if epoch>15:
-                    total_loss = loss_pi + 2*loss_r + loss_c + total_lyapunov_loss + delta_lyapunov_critic_error_mean + mean_initial_lyapunov_penalty + delta_lyapunov_critic_lag_error_mean \
+                    total_loss = loss_pi + 2*loss_r + loss_c + total_lyapunov_loss + delta_lyapunov_critic_error_mean  + delta_lyapunov_critic_lag_error_mean \
                         if config.get("use_value_coefficient", False) \
-                        else loss_pi + loss_r + loss_c + total_lyapunov_loss + mean_initial_lyapunov_penalty + delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean
+                        else loss_pi + loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean
                 else:
-                    total_loss = loss_pi + 2*loss_r + loss_c + total_lyapunov_loss + mean_initial_lyapunov_penalty + delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean \
+                    total_loss = loss_pi + 2*loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean \
                         if config.get("use_value_coefficient", False) \
-                        else loss_pi + loss_r + loss_c + total_lyapunov_loss + mean_initial_lyapunov_penalty + delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean
+                        else loss_pi + loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean
                 #total_loss/=(2+lagrange_coefficient)
                 """ print("Before backward - checking gradients:")
                     for name, param in lyapunov_function.named_parameters():

@@ -148,7 +148,8 @@ def main(args, cfg_env=None):
         gamma=config["gamma"],
     )
     #Set the lyapunov limits
-    lyapunov_threshold = args.cost_limit  # or some predefined safety threshold
+    #lyapunov_threshold = args.cost_limit  # or some predefined safety threshold
+    lyapunov_threshold = 150
     lyapunov_initial_penalty_scale = 10  # Penalty scale for initial state violations
     lambda_lyapunov=0.98
     # set up the logger
