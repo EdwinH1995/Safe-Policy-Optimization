@@ -378,6 +378,7 @@ def main(args, cfg_env=None):
                 total_loss = loss_pi + 2*loss_r + loss_c + (max(lagrange_coeff,0.)+max(expectancy_goal_new,0.))*lyapunov_loss_mean\
                     if config.get("use_value_coefficient", False) \
                     else loss_pi + loss_r + loss_c + (max(lagrange_coeff,0.)+max(expectancy_goal_new,0.))*lyapunov_loss_mean
+                print("expectancy_goal",expectancy_goal_new)
                 total_loss.backward()
                 clip_grad_norm_(policy.parameters(), config["max_grad_norm"])
                 reward_critic_optimizer.step()
