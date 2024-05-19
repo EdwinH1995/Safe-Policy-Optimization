@@ -371,7 +371,7 @@ def main(args, cfg_env=None):
                 with torch.no_grad():
                     lyapunov_current[is_start_b[non_terminating]]=args.cost_limit
                     lyapunov_current[~is_start_b[non_terminating]]=lyapunov_current_pre[~is_start_b[non_terminating]]
-                lyapunov_loss=ratio_cliped*(cost_b+gamma*torch.relu(lyapunov_next)-lyapunov_current)
+                lyapunov_loss=(ratio_cliped[non_terminating])*(cost_b+gamma*torch.relu(lyapunov_next)-lyapunov_current)
                 with torch.no_grad():
                     expectancy_goal_new += lyapunov_loss.mean()
                 lyapunov_loss_mean=lyapunov_loss.mean()
