@@ -367,7 +367,7 @@ def main(args, cfg_env=None):
                 non_terminating=~terminate_b
                 lyapunov_current_pre=safety_network(obs_b[non_terminating])
                 lyapunov_next=safety_network(next_obs_b[non_terminating])
-                lyapunov_current=torch.zeros_like(obs_b[non_terminating],dtype=torch.float32,device=device)
+                lyapunov_current=torch.zeros_like(lyapunov_current_pre,dtype=torch.float32,device=device)
                 with torch.no_grad():
                     lyapunov_current[is_start_b[non_terminating]]=args.cost_limit
                     lyapunov_current[~is_start_b[non_terminating]]=lyapunov_current_pre[~is_start_b[non_terminating]]
