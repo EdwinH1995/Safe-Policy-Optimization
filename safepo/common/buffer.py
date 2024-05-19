@@ -68,6 +68,13 @@ class VectorizedOnPolicyBuffer:
                 "target_value_r": torch.zeros(size, dtype=torch.float32, device=device),
                 "target_value_c": torch.zeros(size, dtype=torch.float32, device=device),
                 "log_prob": torch.zeros(size, dtype=torch.float32, device=device),
+                "next_obs":  torch.zeros(
+                    (size, *obs_space.shape), dtype=torch.float32, device=device
+                ),
+                "lyapunov_current": torch.zeros(size, dtype=torch.float32, device=device),
+                "lyapunov_next": torch.zeros(size, dtype=torch.float32, device=device),
+                "terminate": torch.zeros(size, dtype=torch.bool, device=device),
+                "is_start": torch.zeros(size, dtype=torch.bool, device=device)
             }
             for _ in range(num_envs)
         ]

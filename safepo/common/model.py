@@ -47,6 +47,16 @@ def build_mlp_network(sizes):
         layers += [affine_layer, act()]
     return nn.Sequential(*layers)
 
+class LyapunovFunction(nn.Module):
+    """
+    Network for Lyapunov Functions and Expectancy critic
+    """
+    def __init__(self, obs_dim, hidden_sizes: list = [64, 64]):
+        super().__init__()
+        self.network = build_mlp_network([obs_dim]+hidden_sizes+[1])
+
+    def forward(self, obs):
+        return torch.squeeze(self.network(obs), -1)
 
 class Actor(nn.Module):
     """
