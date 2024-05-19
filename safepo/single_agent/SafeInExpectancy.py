@@ -160,6 +160,8 @@ def main(args, cfg_env=None):
 
     terminate=torch.zeros_like(obs, dtype=torch.bool,device=device)
     is_start=torch.ones_like(obs, dtype=torch.bool,device=device)
+    terminate = terminate.to(torch.bool)
+    is_start = is_start.to(torch.bool)
     expectancy_goal_old=0.
     expectancy_goal_new=0.
     lagrange_coeff=0.
