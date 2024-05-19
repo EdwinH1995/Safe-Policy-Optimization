@@ -38,6 +38,7 @@ from safepo.common.buffer import VectorizedOnPolicyBuffer
 from safepo.common.env import make_sa_mujoco_env, make_sa_isaac_env
 from safepo.common.logger import EpochLogger
 from safepo.common.model import ActorVCritic
+from safepo.common.model import LyapunovFunction
 from safepo.utils.config import single_agent_args, isaac_gym_map, parse_sim_params
 
 
