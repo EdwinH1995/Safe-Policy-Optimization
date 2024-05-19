@@ -98,14 +98,14 @@ class VectorizedOnPolicyBuffer:
         for i, buffer in enumerate(self.buffers):
             assert self.ptr_list[i] < buffer["obs"].shape[0], "Buffer overflow"
             for key, value in data.items():
-                expected_shape = buffer[key].shape[
+                """expected_shape = buffer[key].shape[
                                  1:]  # This gets the shape without the first dimension, which is 'size'
                 actual_shape = value.shape
                 print(f"Storing '{key}': Expected shape {expected_shape}, Actual shape {actual_shape}")
 
                 if value.shape != expected_shape:
                     # If the shapes do not match, raise an error or warning
-                    print(f"Shape mismatch for '{key}'. Expected {expected_shape}, got {actual_shape}")
+                    print(f"Shape mismatch for '{key}'. Expected {expected_shape}, got {actual_shape}")"""
                 buffer[key][self.ptr_list[i]] = value[i]
             self.ptr_list[i] += 1
 
