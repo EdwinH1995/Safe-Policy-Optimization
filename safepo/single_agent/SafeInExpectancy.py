@@ -196,7 +196,7 @@ def main(args, cfg_env=None):
                 lyapunov_current=safety_network(obs)
                 lyapunov_next=safety_network(next_obs)
             terminate= (terminated>0) | (truncated>0)
-            if terminate.dim() == 0:  # If 'terminate' is a scalar
+            """ if terminate.dim() == 0:  # If 'terminate' is a scalar
                 terminate = terminate.unsqueeze(0)  # Adds a dimension
             if is_start.dim() == 0:  # If 'terminate' is a scalar
                 is_start = is_start.unsqueeze(0)  # Adds a dimension
@@ -204,7 +204,7 @@ def main(args, cfg_env=None):
                 if lyapunov_current.dim() == 0:  # If 'terminate' is a scalar
                     lyapunov_current = lyapunov_current.unsqueeze(0)  # Adds a dimension
                 if lyapunov_next.dim() == 0:  # If 'terminate' is a scalar
-                    lyapunov_next = lyapunov_next.unsqueeze(0)  # Adds a dimension
+                    lyapunov_next = lyapunov_next.unsqueeze(0)  # Adds a dimension """
 
             buffer.store(
                 obs=obs,
