@@ -199,6 +199,7 @@ def main(args, cfg_env=None):
                 lyapunov_next=safety_network(next_obs)
             terminate= (terminated>0) | (truncated>0)
             terminate = terminate.to(torch.bool)
+            is_start = is_start.to(torch.bool)
             """ if terminate.dim() == 0:  # If 'terminate' is a scalar
                 terminate = terminate.unsqueeze(0)  # Adds a dimension
             if is_start.dim() == 0:  # If 'terminate' is a scalar
@@ -223,7 +224,7 @@ def main(args, cfg_env=None):
                 terminate=terminate,
                 is_start=is_start
             )
-            is_start=terminate
+            is_start=terminate.clone()
             obs = next_obs
             epoch_end = steps >= local_steps_per_epoch - 1
             for idx, (done, time_out) in enumerate(zip(terminated, truncated)):
