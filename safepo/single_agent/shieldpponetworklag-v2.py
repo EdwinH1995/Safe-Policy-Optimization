@@ -360,7 +360,7 @@ def main(args, cfg_env=None):
         final_kl = torch.ones_like(old_distribution.loc)
         lambda_penalty = 10  # Coefficient for Lyapunov penalty
         total_loss_sum=0
-        epsilon=0.4
+        epsilon=10
         gamma = config['gamma']  # Discount factor from your config
         lagrange_coefficient_lol=lagrange_update
         mean_lyapunov_initial_penalty_sum=0.0
@@ -478,7 +478,7 @@ def main(args, cfg_env=None):
                     penalty_next = torch.relu(1-epsilon-ratio_next) * (lyapunov_next_b[active_mask])
                     #Calculate clipped delta loss0
                     #delta_lyapunov_clipped= (cost_b[active_mask] + gamma * (lyapunov_next) - (lyapunov_current))*((torch.pow(lambda_lyapunov, current_step_b[active_mask])))
-                    delta_lyapunov_clipped= (cost_b[active_mask] + gamma * (clipped_next+penalty_next) - (clipped_current)+penalty_current)*((torch.pow(lambda_lyapunov, current_step_b[active_mask])))
+                    delta_lyapunov_clipped= (cost_b[active_mask] + gamma * (clipped_next) - (clipped_current))*((torch.pow(lambda_lyapunov, current_step_b[active_mask])))
                     #delta_lyapunov = (cost_b + gamma * lyapunov_next - lyapunov_current)*torch.pow(lambda_lyapunov, current_step_b) #+ penalty_current + penalty_next
                     delta_lyapunov_times_ratio_b=(cost_b[active_mask]+gamma*lyapunov_next_b[active_mask]-lyapunov_current_b[active_mask])*((torch.pow(lambda_lyapunov, current_step_b))[active_mask])
                     #delta_lyapunov_times_ratio=(delta_lyapunov* ratio_cliped)[active_mask]
