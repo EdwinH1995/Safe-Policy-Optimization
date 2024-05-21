@@ -560,8 +560,8 @@ def main(args, cfg_env=None):
                 
                 """ print("lagrange_coefficient:",lagrange_coefficient)
                 print("lyapunov_loss",lyapunov_loss) """
-                delta_mask=lagrange_coefficient>-0.01
-                total_lyapunov_loss=(((loss_pi_tensor[active_mask])[~delta_mask]).sum()+delta_lyapunov_clipped_with_ratio_pi[delta_mask].sum())/((((loss_pi_tensor[active_mask])[~delta_mask]).numel())+((delta_lyapunov_clipped_with_ratio_pi[delta_mask]).numel()))
+                delta_mask=lagrange_coefficient>-0.05
+                total_lyapunov_loss=((loss_pi_tensor[active_mask])[~delta_mask]).mean()+10*delta_lyapunov_clipped_with_ratio_pi[delta_mask].sum()
 
                 """ delta_mask=lagrange_coefficient>-0.01
                 lagrange_coefficient_exp=torch.min(torch.pow(1.1,(lagrange_coefficient+0.01)/0.01),torch.full_like(lagrange_coefficient,100000.,dtype=torch.float32,device=device))
