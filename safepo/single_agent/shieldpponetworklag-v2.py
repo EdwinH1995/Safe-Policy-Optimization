@@ -151,7 +151,7 @@ def main(args, cfg_env=None):
     lyapunov_threshold = args.cost_limit/10.  # or some predefined safety threshold
     #lyapunov_threshold = 150
     lyapunov_initial_penalty_scale = 10  # Penalty scale for initial state violations
-    lambda_lyapunov=0.98
+    lambda_lyapunov=1
     # set up the logger
     dict_args = vars(args)
     dict_args.update(config)
@@ -482,9 +482,9 @@ def main(args, cfg_env=None):
                     #delta_lyapunov = (cost_b + gamma * lyapunov_next - lyapunov_current)*torch.pow(lambda_lyapunov, current_step_b) #+ penalty_current + penalty_next
                     delta_lyapunov_times_ratio_b=(cost_b[active_mask]+gamma*lyapunov_next_b[active_mask]-lyapunov_current_b[active_mask])*((torch.pow(lambda_lyapunov, current_step_b))[active_mask])
                     #delta_lyapunov_times_ratio=(delta_lyapunov* ratio_cliped)[active_mask]
-
+                    pi_penalty=torch.relu(ratio_cliped - 1 - epsilon)+torch.relu(1 - epsilon-ratio_cliped)
                     #delta_lyapunov_clipped_with_ratio_pi=ratio_cliped[active_mask] * delta_lyapunov_clipped
-                    delta_lyapunov_clipped_with_ratio_pi=torch.max(ratio[active_mask] * delta_lyapunov_clipped, ratio_cliped[active_mask] * delta_lyapunov_clipped)
+                    delta_lyapunov_clipped_with_ratio_pi=torch.max((ratio[active_mask]+2*pi_penalty) * delta_lyapunov_clipped, (ratio_cliped[active_mask]+2*pi_penalty) * delta_lyapunov_clipped)+pi_penalty
                     #Calculate total Lyapunov loss
                     lyapunov_loss_b=(delta_lyapunov_times_ratio_b).mean()
                     lyapunov_loss= delta_lyapunov_clipped_with_ratio_pi.mean()
@@ -561,7 +561,7 @@ def main(args, cfg_env=None):
                 """ print("lagrange_coefficient:",lagrange_coefficient)
                 print("lyapunov_loss",lyapunov_loss) """
                 delta_mask=(lagrange_coefficient>-0.05) | (delta_lyapunov_critic_copy(obs_b[active_mask])>-0.05)
-                total_lyapunov_loss=(((loss_pi_tensor[active_mask])[~delta_mask]).sum()+10*delta_lyapunov_clipped_with_ratio_pi[delta_mask].sum())/(((loss_pi_tensor[active_mask])[~delta_mask]).numel()+delta_lyapunov_clipped_with_ratio_pi[delta_mask].numel())
+                total_lyapunov_loss=(((loss_pi_tensor[active_mask])[~delta_mask]).sum()+delta_lyapunov_clipped_with_ratio_pi[delta_mask].sum())/(((loss_pi_tensor[active_mask])[~delta_mask]).numel()+(delta_lyapunov_clipped_with_ratio_pi[delta_mask]).numel())
 
                 """ delta_mask=lagrange_coefficient>-0.01
                 lagrange_coefficient_exp=torch.min(torch.pow(1.1,(lagrange_coefficient+0.01)/0.01),torch.full_like(lagrange_coefficient,100000.,dtype=torch.float32,device=device))
