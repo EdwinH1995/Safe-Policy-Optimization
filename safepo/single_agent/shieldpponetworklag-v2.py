@@ -360,7 +360,7 @@ def main(args, cfg_env=None):
         final_kl = torch.ones_like(old_distribution.loc)
         lambda_penalty = 10  # Coefficient for Lyapunov penalty
         total_loss_sum=0
-        epsilon=5
+        epsilon=0.2
         gamma = config['gamma']  # Discount factor from your config
         lagrange_coefficient_lol=lagrange_update
         mean_lyapunov_initial_penalty_sum=0.0
@@ -452,10 +452,10 @@ def main(args, cfg_env=None):
                 lyapunov_current_b=(torch.pow(power, lyapunov_current_b))
                 lyapunov_next_b=(torch.pow(power, lyapunov_next_b))
                 lyapunov_current=torch.zeros_like(lyapunov_current_non_initial, dtype=torch.float32, device=device)
-                lyapunov_current[is_start_b[active_mask]]=args.cost_limit
+                lyapunov_current[is_start_b[active_mask]]=lyapunov_threshold
                 lyapunov_current[~is_start_b[active_mask]]=lyapunov_current_non_initial[~is_start_b[active_mask]]
                 with torch.no_grad():
-                    lyapunov_current_b[is_start_b]=args.cost_limit
+                    lyapunov_current_b[is_start_b]=lyapunov_threshold
                 """ if active_mask.any():
                     ratio_current = lyapunov_current / lyapunov_current_b
                     clipped_ratio_current = torch.clamp(ratio_current, 1-epsilon, 1+epsilon)
@@ -497,8 +497,8 @@ def main(args, cfg_env=None):
                 #pi_proj=scipy(ratio,(cost_b + gamma * lyapunov_next - lyapunov_current)*torch.pow(lambda_lyapunov, current_step_b))
 
 
-                loss_pi = -torch.min(ratio * adv_b, ratio_cliped * adv_b).mean()
-
+                loss_pi_tensor = -torch.min(ratio * adv_b, ratio_cliped * adv_b)
+                loss_pi=loss_pi_tensor.mean()
 
                 if is_start_b.any():
                     initial_lyapunov_divergence = torch.where(is_start_b[active_mask], lyapunov_current - lyapunov_threshold, torch.tensor(float('nan'), device=lyapunov_current.device))
@@ -560,9 +560,12 @@ def main(args, cfg_env=None):
                 
                 """ print("lagrange_coefficient:",lagrange_coefficient)
                 print("lyapunov_loss",lyapunov_loss) """
-                delta_mask=lagrange_coefficient>-0.1
+                delta_mask=lagrange_coefficient>0.
+                total_lyapunov_loss=(loss_pi_tensor[~delta_mask].sum()+delta_lyapunov_clipped_with_ratio_pi[delta_mask].sum())/((loss_pi_tensor[~delta_mask].numel())+(delta_lyapunov_clipped_with_ratio_pi[delta_mask].numel()))
+
+                delta_mask=lagrange_coefficient>-0.01
                 lagrange_coefficient_exp=torch.min(torch.pow(1.1,(lagrange_coefficient+0.01)/0.01),torch.full_like(lagrange_coefficient,100000.,dtype=torch.float32,device=device))
-                total_lyapunov_loss = (lagrange_coefficient_exp[delta_mask]*delta_lyapunov_clipped_with_ratio_pi[delta_mask]).mean()
+                total_lyapunov_loss = loss_pi + (lagrange_coefficient_exp[delta_mask]*delta_lyapunov_clipped_with_ratio_pi[delta_mask]).mean()
                 #total_lyapunov_loss = 5*((torch.max(lagrange_coefficient[lagrange_mask],delta_lyapunov_critic_b[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean())
                 #total_lyapunov_loss = 5*((lagrange_coefficient[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean()
                 #printing stuff
@@ -601,13 +604,13 @@ def main(args, cfg_env=None):
                 print("number_of_redressments",number_of_redressments)
                 print("is_start_test2",is_start_test_2)
                 if epoch>15:
-                    total_loss = loss_pi + 2*loss_r + loss_c + total_lyapunov_loss + delta_lyapunov_critic_error_mean  + delta_lyapunov_critic_lag_error_mean \
+                    total_loss = 2*loss_r + loss_c + total_lyapunov_loss + delta_lyapunov_critic_error_mean  + delta_lyapunov_critic_lag_error_mean \
                         if config.get("use_value_coefficient", False) \
-                        else loss_pi + loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean
+                        else loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean
                 else:
-                    total_loss = loss_pi + 2*loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean \
+                    total_loss = 2*loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean \
                         if config.get("use_value_coefficient", False) \
-                        else loss_pi + loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean
+                        else loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean
                 #total_loss/=(2+lagrange_coefficient)
                 """ print("Before backward - checking gradients:")
                     for name, param in lyapunov_function.named_parameters():
