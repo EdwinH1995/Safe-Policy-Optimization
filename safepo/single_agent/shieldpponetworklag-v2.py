@@ -205,11 +205,6 @@ def main(args, cfg_env=None):
                 for x in (next_obs, reward, cost, terminated, truncated)
             )
             # Print shapes of next_obs, reward, cost, terminated, and truncated
-            print(f"next_obs shape: {next_obs.shape}")
-            print(f"reward shape: {reward.shape}")
-            print(f"cost shape: {cost.shape}")
-            print(f"terminated shape: {terminated.shape}")
-            print(f"truncated shape: {truncated.shape}")
             if "final_observation" in info:
                 info["final_observation"] = np.array(
                     [
@@ -365,7 +360,7 @@ def main(args, cfg_env=None):
         final_kl = torch.ones_like(old_distribution.loc)
         lambda_penalty = 10  # Coefficient for Lyapunov penalty
         total_loss_sum=0
-        epsilon=0.2
+        epsilon=0.4
         gamma = config['gamma']  # Discount factor from your config
         lagrange_coefficient_lol=lagrange_update
         mean_lyapunov_initial_penalty_sum=0.0
@@ -576,7 +571,7 @@ def main(args, cfg_env=None):
                 """ print("lagrange_coefficient:",lagrange_coefficient)
                 print("lyapunov_loss",lyapunov_loss) """
                 delta_mask=delta_lyapunov_clipped_with_ratio_pi>-0.01
-                lagrange_coefficient_exp=torch.pow(1.1,(lagrange_coefficient+0.01)/0.01)
+                lagrange_coefficient_exp=torch.max(torch.pow(1.1,(lagrange_coefficient+0.01)/0.01),torch.full_like(lagrange_coefficient,100000.,dtype=torch.float32,device=device))
                 total_lyapunov_loss = (lagrange_coefficient_exp[delta_mask]*delta_lyapunov_clipped_with_ratio_pi[delta_mask]).mean()
                 #total_lyapunov_loss = 5*((torch.max(lagrange_coefficient[lagrange_mask],delta_lyapunov_critic_b[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean())
                 #total_lyapunov_loss = 5*((lagrange_coefficient[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean()
