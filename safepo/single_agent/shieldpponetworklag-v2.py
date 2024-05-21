@@ -180,7 +180,7 @@ def main(args, cfg_env=None):
     terminate = torch.zeros(args.num_envs, dtype=torch.bool, device=device)
     lagrange_coefficient_lol=0.0
     lagrange_update=0.0
-    current_step_int=0
+    current_step=torch.full((args.num_envs,), 0, dtype=torch.int, device=device)
     for epoch in range(epochs):
         #obs,_= env.reset()
         #obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
@@ -204,6 +204,12 @@ def main(args, cfg_env=None):
                 torch.as_tensor(x, dtype=torch.float32, device=device)
                 for x in (next_obs, reward, cost, terminated, truncated)
             )
+            # Print shapes of next_obs, reward, cost, terminated, and truncated
+            print(f"next_obs shape: {next_obs.shape}")
+            print(f"reward shape: {reward.shape}")
+            print(f"cost shape: {cost.shape}")
+            print(f"terminated shape: {terminated.shape}")
+            print(f"truncated shape: {truncated.shape}")
             if "final_observation" in info:
                 info["final_observation"] = np.array(
                     [
@@ -226,7 +232,6 @@ def main(args, cfg_env=None):
                 lyapunov_next = lyapunov_next.expand(args.num_envs)  # Expand to match the batch size
             if delta_lyapunov.dim() == 0:  # It's a scalar tensor
                 delta_lyapunov = delta_lyapunov.expand(args.num_envs)  # Expand to match the batch size
-            current_step = torch.full((args.num_envs,), current_step_int, dtype=torch.int, device=device)
             terminate=((terminated.clone()) > 0.) | ((truncated.clone()) > 0.)
             if terminated.any()>0. or truncated.any()>0.:
                 terminate_test.append(steps)
@@ -250,9 +255,8 @@ def main(args, cfg_env=None):
                 delta_lyapunov=delta_lyapunov,
                 current_step=current_step
             )
-            current_step_int+=1
-            if terminate.item():
-                current_step_int=0
+            current_step[terminate]=0
+            current_step[~terminate]=current_step[~terminate]+1
             is_start=terminate.clone()
             obs = next_obs
             epoch_end = steps >= local_steps_per_epoch - 1
