@@ -571,8 +571,9 @@ def main(args, cfg_env=None):
                 
                 """ print("lagrange_coefficient:",lagrange_coefficient)
                 print("lyapunov_loss",lyapunov_loss) """
+                delta_mask=delta_lyapunov_clipped_with_ratio_pi>-0.01
                 lagrange_coefficient_exp=torch.pow(1.1,(lagrange_coefficient+0.01)/0.01)
-                total_lyapunov_loss = (lagrange_coefficient_exp*delta_lyapunov_clipped_with_ratio_pi).mean()
+                total_lyapunov_loss = (lagrange_coefficient_exp[delta_mask]*delta_lyapunov_clipped_with_ratio_pi[delta_mask]).mean()
                 #total_lyapunov_loss = 5*((torch.max(lagrange_coefficient[lagrange_mask],delta_lyapunov_critic_b[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean())
                 #total_lyapunov_loss = 5*((lagrange_coefficient[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean()
                 #printing stuff
@@ -581,6 +582,7 @@ def main(args, cfg_env=None):
                 total_loss_sum+=lyapunov_loss_b
                 print("max_target_value_c:",max_target_value_c)
                 print("lagrange_coefficient:",lagrange_coefficient)
+                print("lagrange_coefficient_exp",lagrange_coefficient_exp)
                 print("lagrange_coefficient_mean:",lagrange_coefficient.mean())
                 print("delta_lyapunov_critic_mean:",((delta_lyapunov_critic(obs_b[active_mask]))).mean())
                 print("lyapunov_loss_b",lyapunov_loss_b)
