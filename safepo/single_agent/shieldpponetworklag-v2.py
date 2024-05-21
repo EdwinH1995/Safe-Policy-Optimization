@@ -484,7 +484,7 @@ def main(args, cfg_env=None):
                     #delta_lyapunov_times_ratio=(delta_lyapunov* ratio_cliped)[active_mask]
                     pi_penalty=torch.relu(ratio_cliped - 1.15)+torch.relu(0.85-ratio_cliped)
                     #delta_lyapunov_clipped_with_ratio_pi=ratio_cliped[active_mask] * delta_lyapunov_clipped
-                    delta_lyapunov_clipped_with_ratio_pi=torch.max((ratio[active_mask]+2*+pi_penalty[active_mask]) * delta_lyapunov_clipped, (ratio_cliped[active_mask]+2*+pi_penalty[active_mask]) * delta_lyapunov_clipped)
+                    delta_lyapunov_clipped_with_ratio_pi=torch.max((ratio[active_mask]) * delta_lyapunov_clipped, (ratio_cliped[active_mask]) * delta_lyapunov_clipped)+2*torch.relu(pi_penalty[active_mask] * delta_lyapunov_clipped)
                     #Calculate total Lyapunov loss
                     lyapunov_loss_b=(delta_lyapunov_times_ratio_b).mean()
                     lyapunov_loss= delta_lyapunov_clipped_with_ratio_pi.mean()
