@@ -588,7 +588,7 @@ def main(args, cfg_env=None):
                 print("cost_b",cost_b[active_mask])
                 print("max_target_value_c:",max_target_value_c)
                 print("lagrange_coefficient:",lagrange_coefficient)
-                print("lagrange_coefficient_exp",lagrange_coefficient_exp)
+                #print("lagrange_coefficient_exp",lagrange_coefficient_exp)
                 print("lagrange_coefficient_mean:",lagrange_coefficient.mean())
                 print("delta_lyapunov_critic_mean:",((delta_lyapunov_critic(obs_b[active_mask]))).mean())
                 print("lyapunov_loss_b",lyapunov_loss_b)
