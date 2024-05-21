@@ -115,10 +115,10 @@ class LyapunovFunction(nn.Module):
         #self.network = build_mlp_network([obs_dim] + hidden_sizes + [1])
         #self.max_lyapunov_value = max_lyapunov_value  # Maximum value Lyapunov function can output
         #self.scale= nn.Parameter(torch.ones(1))
-    def __init__(self, obs_dim, act_dim: int,hidden_sizes=[64, 64], gamma=0.99):
+    def __init__(self, obs_dim,hidden_sizes=[64, 64], gamma=0.99):
         super().__init__()
         # Use the existing build_mlp_network function to construct the network
-        self.network = build_mlp_network_relu([obs_dim] + hidden_sizes + [act_dim])
+        self.network = build_mlp_network_relu([obs_dim] + hidden_sizes + [1])
 
     def forward(self, obs):
         output = self.network(obs)
@@ -149,7 +149,7 @@ class DeltaLyapunovCritic(nn.Module):
     def forward(self, obs):
         return torch.squeeze(self.network(obs))
     
-class ExpectqncyCritic(nn.Module):
+class ExpectancyCritic(nn.Module):
     def __init__(self, obs_dim, hidden_sizes: list = [64, 64], gamma=0.99):
         super().__init__()
         self.network = build_mlp_network([obs_dim]+hidden_sizes+[1])
