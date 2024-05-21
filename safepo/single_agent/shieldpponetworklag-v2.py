@@ -228,9 +228,9 @@ def main(args, cfg_env=None):
                 delta_lyapunov = delta_lyapunov.expand(args.num_envs)  # Expand to match the batch size
             current_step = torch.full((args.num_envs,), current_step_int, dtype=torch.int, device=device)
             terminate=((terminated.clone()) > 0.) | ((truncated.clone()) > 0.)
-            if terminated.item()>0. or truncated.item()>0.:
+            if terminated.any()>0. or truncated.any()>0.:
                 terminate_test.append(steps)
-            if is_start:
+            if is_start.any():
                 is_start_test_2.append(steps)
             #print("terminated",terminated)
             #print("truncated",truncated)
