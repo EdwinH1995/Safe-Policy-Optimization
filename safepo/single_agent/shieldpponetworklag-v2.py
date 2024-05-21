@@ -151,7 +151,7 @@ def main(args, cfg_env=None):
     lyapunov_threshold = args.cost_limit/10.  # or some predefined safety threshold
     #lyapunov_threshold = 150
     lyapunov_initial_penalty_scale = 10  # Penalty scale for initial state violations
-    lambda_lyapunov=1
+    lambda_lyapunov=0.98
     # set up the logger
     dict_args = vars(args)
     dict_args.update(config)
@@ -560,7 +560,7 @@ def main(args, cfg_env=None):
                 
                 """ print("lagrange_coefficient:",lagrange_coefficient)
                 print("lyapunov_loss",lyapunov_loss) """
-                delta_mask=lagrange_coefficient>-0.01
+                delta_mask=lagrange_coefficient>-0.1
                 lagrange_coefficient_exp=torch.min(torch.pow(1.1,(lagrange_coefficient+0.01)/0.01),torch.full_like(lagrange_coefficient,100000.,dtype=torch.float32,device=device))
                 total_lyapunov_loss = (lagrange_coefficient_exp[delta_mask]*delta_lyapunov_clipped_with_ratio_pi[delta_mask]).mean()
                 #total_lyapunov_loss = 5*((torch.max(lagrange_coefficient[lagrange_mask],delta_lyapunov_critic_b[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean())

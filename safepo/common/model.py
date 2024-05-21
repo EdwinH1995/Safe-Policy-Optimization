@@ -150,9 +150,9 @@ class DeltaLyapunovCritic(nn.Module):
         return torch.squeeze(self.network(obs))
     
 class ExpectancyCritic(nn.Module):
-    def __init__(self, obs_dim, hidden_sizes: list = [64, 64], gamma=0.99):
+    def __init__(self, obs_dim,act_dim, hidden_sizes: list = [64, 64], gamma=0.99):
         super().__init__()
-        self.network = build_mlp_network([obs_dim]+hidden_sizes+[1])
+        self.network = build_mlp_network([obs_dim]+hidden_sizes+[act_dim])
 
     def forward(self, obs):
         return torch.squeeze(self.network(obs))
