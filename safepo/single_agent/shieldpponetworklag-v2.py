@@ -41,7 +41,7 @@ from safepo.common.model import ActorVCritic
 from safepo.common.model import LyapunovFunction
 from safepo.common.model import DeltaLyapunovCritic
 from safepo.utils.config import single_agent_args, isaac_gym_map, parse_sim_params
-from safety_gymnasium import deepcopy
+from safety_gymnasium.builder import Builder
 
 default_cfg = {
     'hidden_sizes': [64, 64],
@@ -169,6 +169,7 @@ def main(args, cfg_env=None):
     logger.setup_torch_saver(policy.actor)
     logger.log("Start with training.")
     obs,_= env.reset()
+    env1=deepcopy(env)
     obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
     ep_ret, ep_cost, ep_len = (
         np.zeros(args.num_envs),
