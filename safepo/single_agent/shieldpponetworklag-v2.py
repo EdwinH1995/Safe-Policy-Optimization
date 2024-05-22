@@ -95,25 +95,37 @@ Builder.__deepcopy__ = builder_deepcopy
 
 def custom_deepcopy(env):
     """Custom deepcopy function to handle Builder and wrapped environments."""
+    print("Deep copying environment of type:", type(env))
+    
     if isinstance(env, SafeNormalizeObservation):
         base_env = env.env
         base_env_copy = custom_deepcopy(base_env)
+        if base_env_copy is None:
+            raise ValueError("Failed to deepcopy SafeNormalizeObservation's base environment")
         return SafeNormalizeObservation(base_env_copy)
     elif isinstance(env, SafeRescaleAction):
         base_env = env.env
         base_env_copy = custom_deepcopy(base_env)
+        if base_env_copy is None:
+            raise ValueError("Failed to deepcopy SafeRescaleAction's base environment")
         return SafeRescaleAction(base_env_copy, env.min_action, env.max_action)
     elif isinstance(env, SafeAutoResetWrapper):
         base_env = env.env
         base_env_copy = custom_deepcopy(base_env)
+        if base_env_copy is None:
+            raise ValueError("Failed to deepcopy SafeAutoResetWrapper's base environment")
         return SafeAutoResetWrapper(base_env_copy)
     elif isinstance(env, SafeUnsqueeze):
         base_env = env.env
         base_env_copy = custom_deepcopy(base_env)
+        if base_env_copy is None:
+            raise ValueError("Failed to deepcopy SafeUnsqueeze's base environment")
         return SafeUnsqueeze(base_env_copy)
     elif isinstance(env, SafeTimeLimit):
         base_env = env.env
         base_env_copy = custom_deepcopy(base_env)
+        if base_env_copy is None:
+            raise ValueError("Failed to deepcopy SafeTimeLimit's base environment")
         return SafeTimeLimit(base_env_copy, env._max_episode_steps)
     elif isinstance(env, SafetyAsyncVectorEnv):
         # Handle deepcopy for SafetyAsyncVectorEnv
@@ -122,11 +134,11 @@ def custom_deepcopy(env):
                 return custom_deepcopy(e())
             return _thunk
         env_copies = [create_env_fn(e) for e in env.env_fns]
+        return SafetyAsyncVectorEnv(env_copies)
     elif isinstance(env, Builder):
-
         return env.__deepcopy__({})
     else:
-        print("Type of env:", type(env))
+        print("Type not handled specifically, using default deepcopy for type:", type(env))
         return deepcopy(env)
     
 def main(args, cfg_env=None):
