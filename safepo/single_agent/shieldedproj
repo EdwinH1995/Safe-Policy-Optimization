@@ -41,6 +41,7 @@ from safepo.common.model import ActorVCritic
 from safepo.common.model import LyapunovFunction
 from safepo.common.model import DeltaLyapunovCritic
 from safepo.utils.config import single_agent_args, isaac_gym_map, parse_sim_params
+from safety_gymnasium import deepcopy
 
 
 default_cfg = {
@@ -169,6 +170,7 @@ def main(args, cfg_env=None):
     logger.setup_torch_saver(policy.actor)
     logger.log("Start with training.")
     obs,_= env.reset()
+    env1=deepcopy(env)
     obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
     ep_ret, ep_cost, ep_len = (
         np.zeros(args.num_envs),
@@ -335,7 +337,8 @@ def main(args, cfg_env=None):
         old_distribution = policy.actor(data["obs"])
 
         # comnpute advantage
-        advantage = data["adv_r"]
+        advantage_rew = data["adv_r"]
+        advantage_cost = data["adv_c"]
         dataloader = DataLoader(
             dataset=TensorDataset(
                 data["obs"],
@@ -343,7 +346,8 @@ def main(args, cfg_env=None):
                 data["log_prob"],
                 data["target_value_r"],
                 data["target_value_c"],
-                advantage,
+                advantage_rew,
+                advantage_cost,
                 data["cost"],
                 data["next_obs"],
                 data["lyapunov_current"],
@@ -378,6 +382,7 @@ def main(args, cfg_env=None):
                 target_value_r_b,
                 target_value_c_b,
                 adv_b,
+                advc_b,
                 cost_b,
                 next_obs_b,
                 lyapunov_current_b,
@@ -387,281 +392,323 @@ def main(args, cfg_env=None):
                 delta_lyapunov_b,
                 current_step_b
             ) in dataloader:
-                #zeroing gradients for the optimizer
-                max_target_value_c=max(torch.max(target_value_c_b),max_target_value_c)
-                reward_critic_optimizer.zero_grad()
-                loss_r = nn.functional.mse_loss(policy.reward_critic(obs_b), target_value_r_b)
-                cost_critic_optimizer.zero_grad()
-                loss_c = nn.functional.mse_loss(policy.cost_critic(obs_b), target_value_c_b)
-                lyapunov_optimizer.zero_grad()
-                delta_lyapunov_optimizer.zero_grad()
-                delta_lyapunov_critic_lag_optimizer.zero_grad()
-                delta_lyapunov_critic_copy_optimizer.zero_grad()
-                delta_lyapunov_critic_lag_copy_optimizer.zero_grad()
-                if config.get("use_critic_norm", True):
-                    for param in policy.reward_critic.parameters():
-                        loss_r += param.pow(2).sum() * 0.001
-                    for param in policy.cost_critic.parameters():
-                        loss_c += param.pow(2).sum() * 0.001
-                actor_optimizer.zero_grad()
-                #policy loss calculation
-                distribution = policy.actor(obs_b)
-                log_prob = distribution.log_prob(act_b).sum(dim=-1)
-                ratio = torch.exp(log_prob - log_prob_b)
-                ratio_cliped = torch.clamp(ratio, 0.85, 1.15)
-                active_mask = ~terminate_b  # True for non-terminated states
-                total_lyapunov_loss = torch.zeros(1, device=obs_b.device)
-                #lyapunov_current_b=lyapunov_current_b.detach()
-                #lyapunov_next_b=lyapunov_next_b.detach()
-                """ while ((torch.relu(-lyapunov_function(obs_b)))>0.).any():
-                    number_of_redressments+=1
-                    lyapunov_current_prelim = lyapunov_function(obs_b)
-                    loss_c_lyapunov=(torch.relu(-lyapunov_current_prelim+0.1)).mean()*1000
-                    for name, param in lyapunov_function.named_parameters():
-                    print(f"{name} requires grad: {param.requires_grad}")
-                    print("Condition:", ((torch.relu(target_value_c_b-0.1-lyapunov_current_prelim))>0.))
-                    print("Does loss require gradients?:", loss_c_lyapunov.requires_grad)
-                    print("lyapunov_current_prelim",lyapunov_current_prelim)
-                    print("lyapunov_mse_loss", loss_c_lyapunov)
-                    print("target_value_c_b",target_value_c_b)  
-                    lyapunov_optimizer.zero_grad()
-                    loss_c_lyapunov.backward()
-                    lyapunov_optimizer.step() """
-                """ while ((torch.relu(target_value_c_b-0.1-lyapunov_function(obs_b).detach()))>0.).any():
-                    number_of_redressments+=1
-                    lyapunov_current_prelim = lyapunov_function(obs_b)
-                    loss_c_lyapunov=(torch.relu(target_value_c_b-lyapunov_current_prelim)).mean()*1000
-                    for name, param in lyapunov_function.named_parameters():
-                    print(f"{name} requires grad: {param.requires_grad}")
-                    print("Condition:", ((torch.relu(target_value_c_b-0.1-lyapunov_current_prelim))>0.))
-                    print("Does loss require gradients?:", loss_c_lyapunov.requires_grad)
-                    print("lyapunov_current_prelim",lyapunov_current_prelim)
-                    print("lyapunov_mse_loss", loss_c_lyapunov)
-                    print("target_value_c_b",target_value_c_b) 
-                    lyapunov_optimizer.zero_grad()
-                    loss_c_lyapunov.backward()
-                    lyapunov_optimizer.step() """
-
-                lyapunov_optimizer.zero_grad()
-                power=2
-                lyapunov_current_log = lyapunov_function(obs_b[active_mask])
-                lyapunov_next_log = lyapunov_function(next_obs_b[active_mask])
-        
-                lyapunov_current_non_initial=(torch.pow(power, lyapunov_current_log))
-                lyapunov_next =(torch.pow(power, lyapunov_next_log))
-                lyapunov_current_b=(torch.pow(power, lyapunov_current_b))
-                lyapunov_next_b=(torch.pow(power, lyapunov_next_b))
-                lyapunov_current=torch.zeros_like(lyapunov_current_non_initial, dtype=torch.float32, device=device)
-                lyapunov_current[is_start_b[active_mask]]=args.cost_limit
-                lyapunov_current[~is_start_b[active_mask]]=lyapunov_current_non_initial[~is_start_b[active_mask]]
-                with torch.no_grad():
-                    lyapunov_current_b[is_start_b]=args.cost_limit
-                """ if active_mask.any():
-                    ratio_current = lyapunov_current / lyapunov_current_b
-                    clipped_ratio_current = torch.clamp(ratio_current, 1-epsilon, 1+epsilon)
-                    clipped_current = clipped_ratio_current * lyapunov_current_b
-                    delta_lyapunov = cost_b +gamma*lyapunov_next-clipped_current
-                    delta_lyapunov_masked=(delta_lyapunov*ratio_cliped)[active_mask]
-                total_lyapunov_loss = torch.relu(delta_lyapunov_masked.mean()) """
-                if active_mask.any():
-                    # Calculate ratios and apply clipping
-                    ratio_current = (lyapunov_current) / (lyapunov_current_b[active_mask])
-                    epsilon_tensor = torch.full_like(ratio_current, epsilon)
-                    clipped_ratio_current = torch.min(ratio_current, 1+epsilon_tensor)
-                    clipped_current = clipped_ratio_current * (lyapunov_current_b)[active_mask]
-        
-                    ratio_next = (lyapunov_next) / (lyapunov_next_b[active_mask])
-                    clipped_ratio_next = torch.max(ratio_next, 1-epsilon_tensor)
-                    clipped_next = clipped_ratio_next * (lyapunov_next_b[active_mask])
-                    #Calculate clipping penalty
-                    penalty_current = torch.relu(ratio_current - 1 - epsilon) * (lyapunov_current_b[active_mask])
-                    penalty_next = torch.relu(1-epsilon-ratio_next) * (lyapunov_next_b[active_mask])
-                    #Calculate clipped delta loss0
-                    #delta_lyapunov_clipped= (cost_b[active_mask] + gamma * (lyapunov_next) - (lyapunov_current))*((torch.pow(lambda_lyapunov, current_step_b[active_mask])))
-                    delta_lyapunov_clipped= (cost_b[active_mask] + gamma * (clipped_next) - (clipped_current)+2*penalty_next+2*penalty_current)*((torch.pow(lambda_lyapunov, current_step_b[active_mask])))
-                    #delta_lyapunov = (cost_b + gamma * lyapunov_next - lyapunov_current)*torch.pow(lambda_lyapunov, current_step_b) #+ penalty_current + penalty_next
-                    delta_lyapunov_times_ratio_b=(cost_b[active_mask]+gamma*lyapunov_next_b[active_mask]-lyapunov_current_b[active_mask])*((torch.pow(lambda_lyapunov, current_step_b))[active_mask])
-                    #delta_lyapunov_times_ratio=(delta_lyapunov* ratio_cliped)[active_mask]
-
-                    #delta_lyapunov_clipped_with_ratio_pi=ratio_cliped[active_mask] * delta_lyapunov_clipped
-                    delta_lyapunov_clipped_with_ratio_pi=torch.max(ratio[active_mask] * delta_lyapunov_clipped, ratio_cliped[active_mask] * delta_lyapunov_clipped)
-                    #Calculate total Lyapunov loss
-                    lyapunov_loss_b=(delta_lyapunov_times_ratio_b).mean()
-                    lyapunov_loss= delta_lyapunov_clipped_with_ratio_pi.mean()
-                    #lyapunov_loss_clipped=delta_lyapunov_clipped_with_ratio_pi.mean()
-                    #total_lyapunov_loss = lyapunov_loss #+ penalty_current.mean() + penalty_next.mean()
+                if epoch<15:
+                    #zeroing gradients for the optimizer
+                    max_target_value_c=max(torch.max(target_value_c_b),max_target_value_c)
+                    reward_critic_optimizer.zero_grad()
+                    loss_r = nn.functional.mse_loss(policy.reward_critic(obs_b), target_value_r_b)
+                    cost_critic_optimizer.zero_grad()
+                    loss_c = nn.functional.mse_loss(policy.cost_critic(obs_b), target_value_c_b)
+                    if config.get("use_critic_norm", True):
+                        for param in policy.reward_critic.parameters():
+                            loss_r += param.pow(2).sum() * 0.001
+                        for param in policy.cost_critic.parameters():
+                            loss_c += param.pow(2).sum() * 0.001
+                    actor_optimizer.zero_grad()
+                    #policy loss calculation
+                    distribution = policy.actor(obs_b)
+                    log_prob = distribution.log_prob(act_b).sum(dim=-1)
+                    ratio = torch.exp(log_prob - log_prob_b)
+                    ratio_cliped = torch.clamp(ratio, 0.85, 1.15)
+                    loss_pi = -torch.min(ratio * advc_b, ratio_cliped * advc_b).mean()
+                    total_loss= loss_pi+ 2*loss_r + loss_c
+                    total_loss.backwards()
+                    reward_critic_optimizer.step()
+                    cost_critic_optimizer.step()
+                    actor_optimizer.step()
+                elif 15<=epoch<=20:
+                    #zeroing gradients for the optimizer
+                    max_target_value_c=max(torch.max(target_value_c_b),max_target_value_c)
+                    reward_critic_optimizer.zero_grad()
+                    loss_r = nn.functional.mse_loss(policy.reward_critic(obs_b), target_value_r_b)
+                    cost_critic_optimizer.zero_grad()
+                    loss_c = nn.functional.mse_loss(policy.cost_critic(obs_b), target_value_c_b)
+                    if config.get("use_critic_norm", True):
+                        for param in policy.reward_critic.parameters():
+                            loss_r += param.pow(2).sum() * 0.001
+                        for param in policy.cost_critic.parameters():
+                            loss_c += param.pow(2).sum() * 0.001
+                    actor_optimizer.zero_grad()
+                    total_loss= loss_r + loss_c
+                    total_loss.backwards()
+                    reward_critic_optimizer.step()
+                    cost_critic_optimizer.step()
                 else:
-                    total_lyapunov_loss=0.0
-                #Dealing with projections?
-                #delta_lyapunov = (cost_b + gamma * lyapunov_next - lyapunov_current)*torch.pow(lambda_lyapunov, current_step_b)
-                #pi_proj=scipy(ratio,(cost_b + gamma * lyapunov_next - lyapunov_current)*torch.pow(lambda_lyapunov, current_step_b))
+                    #zeroing gradients for the optimizer
+                    max_target_value_c=max(torch.max(target_value_c_b),max_target_value_c)
+                    reward_critic_optimizer.zero_grad()
+                    loss_r = nn.functional.mse_loss(policy.reward_critic(obs_b), target_value_r_b)
+                    cost_critic_optimizer.zero_grad()
+                    loss_c = nn.functional.mse_loss(policy.cost_critic(obs_b), target_value_c_b)
+                    lyapunov_optimizer.zero_grad()
+                    delta_lyapunov_optimizer.zero_grad()
+                    delta_lyapunov_critic_lag_optimizer.zero_grad()
+                    delta_lyapunov_critic_copy_optimizer.zero_grad()
+                    delta_lyapunov_critic_lag_copy_optimizer.zero_grad()
+                    if config.get("use_critic_norm", True):
+                        for param in policy.reward_critic.parameters():
+                            loss_r += param.pow(2).sum() * 0.001
+                        for param in policy.cost_critic.parameters():
+                            loss_c += param.pow(2).sum() * 0.001
+                    actor_optimizer.zero_grad()
+                    #policy loss calculation
+                    distribution = policy.actor(obs_b)
+                    log_prob = distribution.log_prob(act_b).sum(dim=-1)
+                    ratio = torch.exp(log_prob - log_prob_b)
+                    ratio_cliped = torch.clamp(ratio, 0.85, 1.15)
+                    active_mask = ~terminate_b  # True for non-terminated states
+                    total_lyapunov_loss = torch.zeros(1, device=obs_b.device)
+                    #lyapunov_current_b=lyapunov_current_b.detach()
+                    #lyapunov_next_b=lyapunov_next_b.detach()
+                    """ while ((torch.relu(-lyapunov_function(obs_b)))>0.).any():
+                        number_of_redressments+=1
+                        lyapunov_current_prelim = lyapunov_function(obs_b)
+                        loss_c_lyapunov=(torch.relu(-lyapunov_current_prelim+0.1)).mean()*1000
+                        for name, param in lyapunov_function.named_parameters():
+                        print(f"{name} requires grad: {param.requires_grad}")
+                        print("Condition:", ((torch.relu(target_value_c_b-0.1-lyapunov_current_prelim))>0.))
+                        print("Does loss require gradients?:", loss_c_lyapunov.requires_grad)
+                        print("lyapunov_current_prelim",lyapunov_current_prelim)
+                        print("lyapunov_mse_loss", loss_c_lyapunov)
+                        print("target_value_c_b",target_value_c_b)  
+                        lyapunov_optimizer.zero_grad()
+                        loss_c_lyapunov.backward()
+                        lyapunov_optimizer.step() """
+                    """ while ((torch.relu(target_value_c_b-0.1-lyapunov_function(obs_b).detach()))>0.).any():
+                        number_of_redressments+=1
+                        lyapunov_current_prelim = lyapunov_function(obs_b)
+                        loss_c_lyapunov=(torch.relu(target_value_c_b-lyapunov_current_prelim)).mean()*1000
+                        for name, param in lyapunov_function.named_parameters():
+                        print(f"{name} requires grad: {param.requires_grad}")
+                        print("Condition:", ((torch.relu(target_value_c_b-0.1-lyapunov_current_prelim))>0.))
+                        print("Does loss require gradients?:", loss_c_lyapunov.requires_grad)
+                        print("lyapunov_current_prelim",lyapunov_current_prelim)
+                        print("lyapunov_mse_loss", loss_c_lyapunov)
+                        print("target_value_c_b",target_value_c_b) 
+                        lyapunov_optimizer.zero_grad()
+                        loss_c_lyapunov.backward()
+                        lyapunov_optimizer.step() """
 
-
-                loss_pi = -torch.min(ratio * adv_b, ratio_cliped * adv_b).mean()
-
-
-                if is_start_b.any():
-                    initial_lyapunov_divergence = torch.where(is_start_b[active_mask], lyapunov_current - lyapunov_threshold, torch.tensor(float('nan'), device=lyapunov_current.device))
-                    initial_lyapunov_divergence_b = torch.where(is_start_b[active_mask], lyapunov_current_b[active_mask] - lyapunov_threshold, torch.tensor(float('nan'), device=lyapunov_current_b.device))
-                    initial_target_value_c_mean += (policy.cost_critic(obs_b[is_start_b])).mean()
-                    mean_initial_lyapunov_penalty=torch.relu(torch.nanmean(initial_lyapunov_divergence))
-                    mean_lyapunov_initial_penalty_sum+=torch.nanmean(initial_lyapunov_divergence_b)
-                    start_states+=1
-                else:
-                    mean_initial_lyapunov_penalty=0.0
-                #initial_lyapunov_divergence = torch.zeros_like(lyapunov_current)
-                #initial_lyapunov_divergence_b = torch.zeros_like(lyapunov_current)
-                #initial_lyapunov_divergence[is_start_b]=lyapunov_current[is_start_b] - lyapunov_threshold
-                #initial_lyapunov_divergence_b[is_start_b]=lyapunov_current_b[is_start_b] - lyapunov_threshold
-                #initial_lyapunov_penalty = torch.zeros_like(lyapunov_current)
-                #initial_condition_violation = (lyapunov_current > lyapunov_threshold) & is_start_b
-                #initial_lyapunov_penalty[initial_condition_violation] = lyapunov_initial_penalty_scale * (lyapunov_current[initial_condition_violation] - lyapunov_threshold)
-                
-                #Delta Lyapunov Critic Loss
-                if active_mask.any():
+                    lyapunov_optimizer.zero_grad()
+                    power=2
+                    lyapunov_current_log = lyapunov_function(obs_b[active_mask])
+                    lyapunov_next_log = lyapunov_function(next_obs_b[active_mask])
+            
+                    lyapunov_current_non_initial=(torch.pow(power, lyapunov_current_log))
+                    lyapunov_next =(torch.pow(power, lyapunov_next_log))
+                    lyapunov_current_b=(torch.pow(power, lyapunov_current_b))
+                    lyapunov_next_b=(torch.pow(power, lyapunov_next_b))
+                    lyapunov_current=torch.zeros_like(lyapunov_current_non_initial, dtype=torch.float32, device=device)
+                    lyapunov_current[is_start_b[active_mask]]=args.cost_limit
+                    lyapunov_current[~is_start_b[active_mask]]=lyapunov_current_non_initial[~is_start_b[active_mask]]
                     with torch.no_grad():
-                        delta_lyapunov_critic_lag_b=delta_lyapunov_critic_lag_copy(obs_b[active_mask])
-                        delta_lyapunov_critic_b=delta_lyapunov_critic_copy(obs_b[active_mask])
-                    delta_lyapunov_critic_error_mean=mse_loss((delta_lyapunov_critic(obs_b[active_mask])),delta_lyapunov_times_ratio_b)
-                    delta_lyapunov_critic_lag_error_mean=mse_loss((torch.relu(delta_lyapunov_critic_lag_b)+delta_lyapunov_critic_b),delta_lyapunov_critic_lag(obs_b[active_mask]))
-                    #delta_lyapunov_critic_lag_error_mean=mse_loss(torch.relu(delta_lyapunov_critic_lag_b+delta_lyapunov_critic_b),delta_lyapunov_critic_lag(obs_b[active_mask]))
-                    #delta_lyapunov_critic_error_mean=torch.abs(((delta_lyapunov_critic(obs_b))[active_mask]).mean()-lyapunov_loss_b)
-                else:
-                    delta_lyapunov_critic_error_mean=0.0
+                        lyapunov_current_b[is_start_b]=args.cost_limit
+                    """ if active_mask.any():
+                        ratio_current = lyapunov_current / lyapunov_current_b
+                        clipped_ratio_current = torch.clamp(ratio_current, 1-epsilon, 1+epsilon)
+                        clipped_current = clipped_ratio_current * lyapunov_current_b
+                        delta_lyapunov = cost_b +gamma*lyapunov_next-clipped_current
+                        delta_lyapunov_masked=(delta_lyapunov*ratio_cliped)[active_mask]
+                    total_lyapunov_loss = torch.relu(delta_lyapunov_masked.mean()) """
+                    if active_mask.any():
+                        # Calculate ratios and apply clipping
+                        ratio_current = (lyapunov_current) / (lyapunov_current_b[active_mask])
+                        epsilon_tensor = torch.full_like(ratio_current, epsilon)
+                        clipped_ratio_current = torch.min(ratio_current, 1+epsilon_tensor)
+                        clipped_current = clipped_ratio_current * (lyapunov_current_b)[active_mask]
+            
+                        ratio_next = (lyapunov_next) / (lyapunov_next_b[active_mask])
+                        clipped_ratio_next = torch.max(ratio_next, 1-epsilon_tensor)
+                        clipped_next = clipped_ratio_next * (lyapunov_next_b[active_mask])
+                        #Calculate clipping penalty
+                        penalty_current = torch.relu(ratio_current - 1 - epsilon) * (lyapunov_current_b[active_mask])
+                        penalty_next = torch.relu(1-epsilon-ratio_next) * (lyapunov_next_b[active_mask])
+                        #Calculate clipped delta loss0
+                        #delta_lyapunov_clipped= (cost_b[active_mask] + gamma * (lyapunov_next) - (lyapunov_current))*((torch.pow(lambda_lyapunov, current_step_b[active_mask])))
+                        delta_lyapunov_clipped= (cost_b[active_mask] + gamma * (clipped_next) - (clipped_current)+2*penalty_next+2*penalty_current)*((torch.pow(lambda_lyapunov, current_step_b[active_mask])))
+                        #delta_lyapunov = (cost_b + gamma * lyapunov_next - lyapunov_current)*torch.pow(lambda_lyapunov, current_step_b) #+ penalty_current + penalty_next
+                        delta_lyapunov_times_ratio_b=(cost_b[active_mask]+gamma*lyapunov_next_b[active_mask]-lyapunov_current_b[active_mask])*((torch.pow(lambda_lyapunov, current_step_b))[active_mask])
+                        #delta_lyapunov_times_ratio=(delta_lyapunov* ratio_cliped)[active_mask]
 
-                #Compute lagrange coefficient
-                with torch.no_grad():
-                    lagrange_coefficient=delta_lyapunov_critic_lag_copy(obs_b[active_mask])+delta_lyapunov_critic_copy(obs_b[active_mask])
-                #lagrange_coefficient=lyapunov_loss_b
-                #with torch.no_grad():
-                    #for i in range(min(num_instances,epoch-1)):
-                        #lagrange_coefficient=lagrange_coefficient+((delta_lyapunov_critic_history[i])(obs_b[active_mask])).mean()
-                        #print("delta_lyapuunov_critic_history",(delta_lyapunov_critic_history[i])(obs_b))
-                        #print("delta_lyapunov_critic_history_mean",((delta_lyapunov_critic_history[i])(obs_b)).mean())
-
-
-
-                """ lagrange_coefficient=torch.zeros_like(lyapunov_current, dtype=torch.float32, device=device)
-                with torch.no_grad():
-                    for i in range(min(num_instances,epoch-1)):
-                        if not lagrange_coefficient.shape==(delta_lyapunov_critic_history[i])(obs_b[active_mask]).shape:
-                            print("Shape mismatch detected!")
-                            print("Shape of lagrange_coefficient:", lagrange_coefficient.shape)
-                            print("Shape of obs_b:", obs_b.shape)
-                            print("Shape of delta_output:", (delta_lyapunov_critic_history[i])(obs_b[active_mask]).shape)
-                            print("lagrange:",lagrange_coefficient)
-                            print("obs_b",obs_b)
-                            print("(delta_lyapunov_critic_history[i])(obs_b)",(delta_lyapunov_critic_history[i])(obs_b[active_mask]))
-                        lagrange_coefficient=lagrange_coefficient+((delta_lyapunov_critic_history[i])(obs_b[active_mask]))
-                        print("delta_lyapuunov_critic_history",(delta_lyapunov_critic_history[i])(obs_b[active_mask]))
-                        print("delta_lyapunov_critic_history_mean",((delta_lyapunov_critic_history[i])(obs_b[active_mask])).mean()) """
-                #lagrange_mask=(lagrange_coefficient>-0.01) | (delta_lyapunov_critic_b>-0.01)
-                lagrange_mask=(lagrange_coefficient>0.)
-                
-                """ print("lagrange_coefficient:",lagrange_coefficient)
-                print("lyapunov_loss",lyapunov_loss) """
-                delta_mask=delta_lyapunov_clipped_with_ratio_pi>-0.01
-                lagrange_coefficient_exp=torch.min(torch.pow(1.1,(lagrange_coefficient+0.01)/0.01),torch.full_like(lagrange_coefficient,100000.,dtype=torch.float32,device=device))
-                total_lyapunov_loss = (lagrange_coefficient_exp[delta_mask]*delta_lyapunov_clipped_with_ratio_pi[delta_mask]).mean()
-                #total_lyapunov_loss = 5*((torch.max(lagrange_coefficient[lagrange_mask],delta_lyapunov_critic_b[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean())
-                #total_lyapunov_loss = 5*((lagrange_coefficient[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean()
-                #printing stuff
+                        #delta_lyapunov_clipped_with_ratio_pi=ratio_cliped[active_mask] * delta_lyapunov_clipped
+                        delta_lyapunov_clipped_with_ratio_pi=torch.max(ratio[active_mask] * delta_lyapunov_clipped, ratio_cliped[active_mask] * delta_lyapunov_clipped)
+                        #Calculate total Lyapunov loss
+                        lyapunov_loss_b=(delta_lyapunov_times_ratio_b).mean()
+                        lyapunov_loss= delta_lyapunov_clipped_with_ratio_pi.mean()
+                        #lyapunov_loss_clipped=delta_lyapunov_clipped_with_ratio_pi.mean()
+                        #total_lyapunov_loss = lyapunov_loss #+ penalty_current.mean() + penalty_next.mean()
+                    else:
+                        total_lyapunov_loss=0.0
+                    #Dealing with projections?
+                    #delta_lyapunov = (cost_b + gamma * lyapunov_next - lyapunov_current)*torch.pow(lambda_lyapunov, current_step_b)
+                    #pi_proj=scipy(ratio,(cost_b + gamma * lyapunov_next - lyapunov_current)*torch.pow(lambda_lyapunov, current_step_b))
 
 
-                total_loss_sum+=lyapunov_loss_b
-                print("lyapunov_current_log", lyapunov_current_log)
-                print("lyapunov_next_log", lyapunov_next_log)
-                print("lyapunov_current:",lyapunov_current)
-                print("lyapunov_current_b:",lyapunov_current_b[active_mask])
-                print("ratio_current",ratio_current)
-                print("lyapunov_next:",lyapunov_next)
-                print("lyapunov_next_b:",lyapunov_next_b[active_mask])
-                print("ratio_next",ratio_current)
-                print('delta_lyapunov:',delta_lyapunov)
-                print('delta_lyapunov_times_ratio_b:',delta_lyapunov_times_ratio_b)
-                print("cost_b",cost_b[active_mask])
-                print("max_target_value_c:",max_target_value_c)
-                print("lagrange_coefficient:",lagrange_coefficient)
-                print("lagrange_coefficient_exp",lagrange_coefficient_exp)
-                print("lagrange_coefficient_mean:",lagrange_coefficient.mean())
-                print("delta_lyapunov_critic_mean:",((delta_lyapunov_critic(obs_b[active_mask]))).mean())
-                print("lyapunov_loss_b",lyapunov_loss_b)
-                print("lyapunov_current.mean()",lyapunov_current_b.mean())
-                print("lyapunov_next.mean()",lyapunov_next_b.mean())
-                print("total_lyapunov_loss:",total_lyapunov_loss)
-                print("is_start_b",is_start_b)
-                print("loss pi:",loss_pi)
-                print("total_lyapunov_sum:", total_loss_sum)
-                print("Mean Initial Lyapunov Penalty:", mean_initial_lyapunov_penalty)
-                print("Mean Initial Lyapunov Penalty Mean:", mean_lyapunov_initial_penalty_sum/(start_states+0.01))
-                print("Mean initial target cost",initial_target_value_c_mean/(start_states+0.01))
-                print("start_is_1000_m",start_is_1000_multiple)
-                print("start_witness",start_witness)
-                print("lagrange:",lagrange_coefficient_lol)
-                print("number_of_redressments",number_of_redressments)
-                print("is_start_test2",is_start_test_2)
-                if epoch>15:
-                    total_loss = loss_pi + 2*loss_r + loss_c + total_lyapunov_loss + delta_lyapunov_critic_error_mean  + delta_lyapunov_critic_lag_error_mean \
-                        if config.get("use_value_coefficient", False) \
-                        else loss_pi + loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean
-                else:
-                    total_loss = loss_pi + 2*loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean \
-                        if config.get("use_value_coefficient", False) \
-                        else loss_pi + loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean
-                #total_loss/=(2+lagrange_coefficient)
-                """ print("Before backward - checking gradients:")
+                    loss_pi = -torch.min(ratio * adv_b, ratio_cliped * adv_b).mean()
+
+
+                    if is_start_b.any():
+                        initial_lyapunov_divergence = torch.where(is_start_b[active_mask], lyapunov_current - lyapunov_threshold, torch.tensor(float('nan'), device=lyapunov_current.device))
+                        initial_lyapunov_divergence_b = torch.where(is_start_b[active_mask], lyapunov_current_b[active_mask] - lyapunov_threshold, torch.tensor(float('nan'), device=lyapunov_current_b.device))
+                        initial_target_value_c_mean += (policy.cost_critic(obs_b[is_start_b])).mean()
+                        mean_initial_lyapunov_penalty=torch.relu(torch.nanmean(initial_lyapunov_divergence))
+                        mean_lyapunov_initial_penalty_sum+=torch.nanmean(initial_lyapunov_divergence_b)
+                        start_states+=1
+                    else:
+                        mean_initial_lyapunov_penalty=0.0
+                    #initial_lyapunov_divergence = torch.zeros_like(lyapunov_current)
+                    #initial_lyapunov_divergence_b = torch.zeros_like(lyapunov_current)
+                    #initial_lyapunov_divergence[is_start_b]=lyapunov_current[is_start_b] - lyapunov_threshold
+                    #initial_lyapunov_divergence_b[is_start_b]=lyapunov_current_b[is_start_b] - lyapunov_threshold
+                    #initial_lyapunov_penalty = torch.zeros_like(lyapunov_current)
+                    #initial_condition_violation = (lyapunov_current > lyapunov_threshold) & is_start_b
+                    #initial_lyapunov_penalty[initial_condition_violation] = lyapunov_initial_penalty_scale * (lyapunov_current[initial_condition_violation] - lyapunov_threshold)
+                    
+                    #Delta Lyapunov Critic Loss
+                    if active_mask.any():
+                        with torch.no_grad():
+                            delta_lyapunov_critic_lag_b=delta_lyapunov_critic_lag_copy(obs_b[active_mask])
+                            delta_lyapunov_critic_b=delta_lyapunov_critic_copy(obs_b[active_mask])
+                        delta_lyapunov_critic_error_mean=mse_loss((delta_lyapunov_critic(obs_b[active_mask])),delta_lyapunov_times_ratio_b)
+                        delta_lyapunov_critic_lag_error_mean=mse_loss((torch.relu(delta_lyapunov_critic_lag_b)+delta_lyapunov_critic_b),delta_lyapunov_critic_lag(obs_b[active_mask]))
+                        #delta_lyapunov_critic_lag_error_mean=mse_loss(torch.relu(delta_lyapunov_critic_lag_b+delta_lyapunov_critic_b),delta_lyapunov_critic_lag(obs_b[active_mask]))
+                        #delta_lyapunov_critic_error_mean=torch.abs(((delta_lyapunov_critic(obs_b))[active_mask]).mean()-lyapunov_loss_b)
+                    else:
+                        delta_lyapunov_critic_error_mean=0.0
+
+                    #Compute lagrange coefficient
+                    with torch.no_grad():
+                        lagrange_coefficient=delta_lyapunov_critic_lag_copy(obs_b[active_mask])+delta_lyapunov_critic_copy(obs_b[active_mask])
+                    #lagrange_coefficient=lyapunov_loss_b
+                    #with torch.no_grad():
+                        #for i in range(min(num_instances,epoch-1)):
+                            #lagrange_coefficient=lagrange_coefficient+((delta_lyapunov_critic_history[i])(obs_b[active_mask])).mean()
+                            #print("delta_lyapuunov_critic_history",(delta_lyapunov_critic_history[i])(obs_b))
+                            #print("delta_lyapunov_critic_history_mean",((delta_lyapunov_critic_history[i])(obs_b)).mean())
+
+
+
+                    """ lagrange_coefficient=torch.zeros_like(lyapunov_current, dtype=torch.float32, device=device)
+                    with torch.no_grad():
+                        for i in range(min(num_instances,epoch-1)):
+                            if not lagrange_coefficient.shape==(delta_lyapunov_critic_history[i])(obs_b[active_mask]).shape:
+                                print("Shape mismatch detected!")
+                                print("Shape of lagrange_coefficient:", lagrange_coefficient.shape)
+                                print("Shape of obs_b:", obs_b.shape)
+                                print("Shape of delta_output:", (delta_lyapunov_critic_history[i])(obs_b[active_mask]).shape)
+                                print("lagrange:",lagrange_coefficient)
+                                print("obs_b",obs_b)
+                                print("(delta_lyapunov_critic_history[i])(obs_b)",(delta_lyapunov_critic_history[i])(obs_b[active_mask]))
+                            lagrange_coefficient=lagrange_coefficient+((delta_lyapunov_critic_history[i])(obs_b[active_mask]))
+                            print("delta_lyapuunov_critic_history",(delta_lyapunov_critic_history[i])(obs_b[active_mask]))
+                            print("delta_lyapunov_critic_history_mean",((delta_lyapunov_critic_history[i])(obs_b[active_mask])).mean()) """
+                    #lagrange_mask=(lagrange_coefficient>-0.01) | (delta_lyapunov_critic_b>-0.01)
+                    lagrange_mask=(lagrange_coefficient>0.)
+                    
+                    """ print("lagrange_coefficient:",lagrange_coefficient)
+                    print("lyapunov_loss",lyapunov_loss) """
+                    delta_mask=delta_lyapunov_clipped_with_ratio_pi>-0.05
+                    lagrange_coefficient_exp=torch.min(torch.pow(1.1,(lagrange_coefficient+0.01)/0.01),torch.full_like(lagrange_coefficient,100000.,dtype=torch.float32,device=device))
+                    total_lyapunov_loss = (lagrange_coefficient_exp[delta_mask]*delta_lyapunov_clipped_with_ratio_pi[delta_mask]).mean()
+                    #total_lyapunov_loss = 5*((torch.max(lagrange_coefficient[lagrange_mask],delta_lyapunov_critic_b[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean())
+                    #total_lyapunov_loss = 5*((lagrange_coefficient[lagrange_mask])*delta_lyapunov_clipped_with_ratio_pi[lagrange_mask]).mean()
+                    #printing stuff
+
+
+                    total_loss_sum+=lyapunov_loss_b
+                    print("lyapunov_current_log", lyapunov_current_log)
+                    print("lyapunov_next_log", lyapunov_next_log)
+                    print("lyapunov_current:",lyapunov_current)
+                    print("lyapunov_current_b:",lyapunov_current_b[active_mask])
+                    print("ratio_current",ratio_current)
+                    print("lyapunov_next:",lyapunov_next)
+                    print("lyapunov_next_b:",lyapunov_next_b[active_mask])
+                    print("ratio_next",ratio_current)
+                    print('delta_lyapunov:',delta_lyapunov)
+                    print('delta_lyapunov_times_ratio_b:',delta_lyapunov_times_ratio_b)
+                    print("cost_b",cost_b[active_mask])
+                    print("max_target_value_c:",max_target_value_c)
+                    print("lagrange_coefficient:",lagrange_coefficient)
+                    print("lagrange_coefficient_exp",lagrange_coefficient_exp)
+                    print("lagrange_coefficient_mean:",lagrange_coefficient.mean())
+                    print("delta_lyapunov_critic_mean:",((delta_lyapunov_critic(obs_b[active_mask]))).mean())
+                    print("lyapunov_loss_b",lyapunov_loss_b)
+                    print("lyapunov_current.mean()",lyapunov_current_b.mean())
+                    print("lyapunov_next.mean()",lyapunov_next_b.mean())
+                    print("total_lyapunov_loss:",total_lyapunov_loss)
+                    print("is_start_b",is_start_b)
+                    print("loss pi:",loss_pi)
+                    print("total_lyapunov_sum:", total_loss_sum)
+                    print("Mean Initial Lyapunov Penalty:", mean_initial_lyapunov_penalty)
+                    print("Mean Initial Lyapunov Penalty Mean:", mean_lyapunov_initial_penalty_sum/(start_states+0.01))
+                    print("Mean initial target cost",initial_target_value_c_mean/(start_states+0.01))
+                    print("start_is_1000_m",start_is_1000_multiple)
+                    print("start_witness",start_witness)
+                    print("lagrange:",lagrange_coefficient_lol)
+                    print("number_of_redressments",number_of_redressments)
+                    print("is_start_test2",is_start_test_2)
+                    if epoch>15:
+                        total_loss = loss_pi + 2*loss_r + loss_c + total_lyapunov_loss + delta_lyapunov_critic_error_mean  + delta_lyapunov_critic_lag_error_mean \
+                            if config.get("use_value_coefficient", False) \
+                            else loss_pi + loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean
+                    else:
+                        total_loss = loss_pi + 2*loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean \
+                            if config.get("use_value_coefficient", False) \
+                            else loss_pi + loss_r + loss_c + total_lyapunov_loss +  delta_lyapunov_critic_error_mean + delta_lyapunov_critic_lag_error_mean
+                    #total_loss/=(2+lagrange_coefficient)
+                    """ print("Before backward - checking gradients:")
+                        for name, param in lyapunov_function.named_parameters():
+                        if param.requires_grad:
+                            print(f"{name} gradient: {param.grad}")
+                    for name, param in policy.reward_critic.named_parameters():
+                        if param.requires_grad:
+                            print(f"{name} gradient: {param.grad}")
+                    for name, param in policy.cost_critic.named_parameters():
+                        if param.requires_grad:
+                            print(f"{name} gradient: {param.grad}")
+                    for name, param in policy.actor.named_parameters():
+                        if param.requires_grad:
+                            print(f"{name} gradient: {param.grad}")
+                    print("Before backward - checking requires gradients:")
                     for name, param in lyapunov_function.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} gradient: {param.grad}")
-                   for name, param in policy.reward_critic.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} gradient: {param.grad}")
-                for name, param in policy.cost_critic.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} gradient: {param.grad}")
-                for name, param in policy.actor.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} gradient: {param.grad}")
-                print("Before backward - checking requires gradients:")
-                for name, param in lyapunov_function.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} will accumulate gradients: {param.requires_grad and param.grad is not None}")
-                for name, param in policy.reward_critic.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} will accumulate gradients: {param.requires_grad and param.grad is not None}")
-                for name, param in policy.cost_critic.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} will accumulate gradients: {param.requires_grad and param.grad is not None}")
-                for name, param in policy.actor.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} will accumulate gradients: {param.requires_grad and param.grad is not None}") """
-                total_loss.backward()
+                        if param.requires_grad:
+                            print(f"{name} will accumulate gradients: {param.requires_grad and param.grad is not None}")
+                    for name, param in policy.reward_critic.named_parameters():
+                        if param.requires_grad:
+                            print(f"{name} will accumulate gradients: {param.requires_grad and param.grad is not None}")
+                    for name, param in policy.cost_critic.named_parameters():
+                        if param.requires_grad:
+                            print(f"{name} will accumulate gradients: {param.requires_grad and param.grad is not None}")
+                    for name, param in policy.actor.named_parameters():
+                        if param.requires_grad:
+                            print(f"{name} will accumulate gradients: {param.requires_grad and param.grad is not None}") """
+                    total_loss.backward()
 
-                """ print("After backward - checking gradients:")
-                for name, param in lyapunov_function.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} gradient: {param.grad}")
-                for name, param in policy.reward_critic.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} gradient: {param.grad}")
-                for name, param in policy.cost_critic.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} gradient: {param.grad}")
-                for name, param in policy.actor.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name} gradient: {param.grad}")
-                try:
-                    total_loss.backward()  # This should raise an error if graph is already freed
-                    print("Second backward call succeeded (unexpected under normal circumstances)")
-                except RuntimeError as e:
-                    print("Second backward call failed as expected: ", str(e)) """
-                clip_grad_norm_(policy.parameters(), config["max_grad_norm"])
-                reward_critic_optimizer.step()
-                cost_critic_optimizer.step()
-                actor_optimizer.step()
-                lyapunov_optimizer.step()
-                delta_lyapunov_optimizer.step()
-                delta_lyapunov_critic_lag_optimizer.step()
+                    """ print("After backward - checking gradients:")
+                    for name, param in lyapunov_function.named_parameters():
+                        if param.requires_grad:
+                            print(f"{name} gradient: {param.grad}")
+                    for name, param in policy.reward_critic.named_parameters():
+                        if param.requires_grad:
+                            print(f"{name} gradient: {param.grad}")
+                    for name, param in policy.cost_critic.named_parameters():
+                        if param.requires_grad:
+                            print(f"{name} gradient: {param.grad}")
+                    for name, param in policy.actor.named_parameters():
+                        if param.requires_grad:
+                            print(f"{name} gradient: {param.grad}")
+                    try:
+                        total_loss.backward()  # This should raise an error if graph is already freed
+                        print("Second backward call succeeded (unexpected under normal circumstances)")
+                    except RuntimeError as e:
+                        print("Second backward call failed as expected: ", str(e)) """
+                    clip_grad_norm_(policy.parameters(), config["max_grad_norm"])
+                    reward_critic_optimizer.step()
+                    cost_critic_optimizer.step()
+                    actor_optimizer.step()
+                    lyapunov_optimizer.step()
+                    delta_lyapunov_optimizer.step()
+                    delta_lyapunov_critic_lag_optimizer.step()
                 logger.store(
                     **{
                         "Loss/Loss_reward_critic": loss_r.mean().item(),
