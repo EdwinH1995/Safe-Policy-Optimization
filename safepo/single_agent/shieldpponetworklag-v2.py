@@ -41,6 +41,7 @@ from safepo.common.model import ActorVCritic
 from safepo.common.model import LyapunovFunction
 from safepo.common.model import DeltaLyapunovCritic
 from safepo.utils.config import single_agent_args, isaac_gym_map, parse_sim_params
+import safety_gymnasium
 from safety_gymnasium.builder import Builder
 
 default_cfg = {
@@ -200,6 +201,9 @@ def main(args, cfg_env=None):
     logger.log("Start with training.")
     obs,_= env.reset()
     print("Type of env:", type(env.env))
+    #Check the type of env to understand its class
+    env = safety_gymnasium.make("SafetyPointGoal1-v0")
+    print(type(env))
     env1 = custom_deepcopy(env)
     obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
     ep_ret, ep_cost, ep_len = (
