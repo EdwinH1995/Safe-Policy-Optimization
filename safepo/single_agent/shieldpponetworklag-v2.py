@@ -41,7 +41,7 @@ from safepo.common.model import ActorVCritic
 from safepo.common.model import LyapunovFunction
 from safepo.common.model import DeltaLyapunovCritic
 from safepo.utils.config import single_agent_args, isaac_gym_map, parse_sim_params
-
+from safety_gymnasium import deepcopy
 
 default_cfg = {
     'hidden_sizes': [64, 64],
