@@ -47,6 +47,8 @@ from safety_gymnasium.builder import Builder
 from safepo.common.wrappers import SafeNormalizeObservation
 from safety_gymnasium.wrappers import SafeRescaleAction, SafeAutoResetWrapper, SafeUnsqueeze, SafeTimeLimit
 from gymnasium.wrappers import OrderEnforcing
+from safety_gymnasium.wrappers.env_checker import SafePassiveEnvChecker
+
 
 default_cfg = {
     'hidden_sizes': [64, 64],
@@ -141,7 +143,13 @@ def custom_deepcopy(env):
         base_env_copy = custom_deepcopy(base_env)
         if base_env_copy is None:
             raise ValueError("Failed to deepcopy OrderEnforcing's base environment")
-        return OrderEnforcing(base_env_copy, disable_render_order_enforcing=env.disable_render_order_enforcing)
+        return OrderEnforcing(base_env_copy, disable_render_order_enforcing=False)
+    elif isinstance(env, SafePassiveEnvChecker):
+        base_env = env.env
+        base_env_copy = custom_deepcopy(base_env)
+        if base_env_copy is None:
+            raise ValueError("Failed to deepcopy SafePassiveEnvChecker's base environment")
+        return SafePassiveEnvChecker(base_env_copy)
     elif isinstance(env, Builder):
         return env.__deepcopy__({})
     else:
