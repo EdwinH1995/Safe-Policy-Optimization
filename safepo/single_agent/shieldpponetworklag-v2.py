@@ -21,7 +21,7 @@ import random
 import sys
 import time
 from collections import deque
-
+from copy import deepcopy
 import numpy as np
 try: 
     from isaacgym import gymutil
