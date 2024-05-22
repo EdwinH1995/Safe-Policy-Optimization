@@ -117,8 +117,11 @@ def custom_deepcopy(env):
         return SafeTimeLimit(base_env_copy, env._max_episode_steps)
     elif isinstance(env, SafetyAsyncVectorEnv):
         # Handle deepcopy for SafetyAsyncVectorEnv
-        env_copies = [custom_deepcopy(e()) for e in env.env_fns]
-        return SafetyAsyncVectorEnv(env_copies)
+        def create_env_fn(e):
+            def _thunk():
+                return custom_deepcopy(e())
+            return _thunk
+        env_copies = [create_env_fn(e) for e in env.env_fns]
     elif isinstance(env, Builder):
 
         return env.__deepcopy__({})
