@@ -65,6 +65,31 @@ isaac_gym_specific_cfg = {
     'use_critic_norm': False,
 }
 
+# Define the __deepcopy__ method
+def builder_deepcopy(self, memo):
+    """Make class instance copyable."""
+    other = Builder(
+        self.task_id,
+        self.config,
+        self.render_parameters.mode,
+        self.render_parameters.width,
+        self.render_parameters.height,
+        self.render_parameters.camera_id,
+        self.render_parameters.camera_name,
+    )
+    other._seed = self._seed
+    other.first_reset = self.first_reset
+    other.steps = self.steps
+    other.cost = self.cost
+    other.terminated = self.terminated
+    other.truncated = self.truncated
+    other.task = deepcopy(self.task)  # Use copy.deepcopy to deepcopy the task
+    return other
+
+# Dynamically add the method to the Builder class
+Builder.__deepcopy__ = builder_deepcopy
+
+
 def main(args, cfg_env=None):
     # set the random seed, device and number of threads
     random.seed(args.seed)
