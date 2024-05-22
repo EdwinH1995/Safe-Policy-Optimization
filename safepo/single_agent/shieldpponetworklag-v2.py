@@ -44,7 +44,7 @@ from safepo.utils.config import single_agent_args, isaac_gym_map, parse_sim_para
 import safety_gymnasium
 from safety_gymnasium.vector.async_vector_env import SafetyAsyncVectorEnv
 from safety_gymnasium.builder import Builder
-from safety_gymnasium.wrappers import SafeNormalizeObservation, SafeRescaleAction, SafeAutoResetWrapper, SafeUnsqueeze, SafeTimeLimit
+from safepo.common.wrappers import SafeNormalizeObservation, SafeRescaleAction, SafeAutoResetWrapper, SafeUnsqueeze, SafeTimeLimit
 
 default_cfg = {
     'hidden_sizes': [64, 64],
