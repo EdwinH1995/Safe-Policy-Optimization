@@ -202,7 +202,7 @@ def main(args, cfg_env=None):
     obs,_= env.reset()
     print("Type of env:", type(env.env))
     #Check the type of env to understand its class
-    env = safety_gymnasium.make("SafetyPointGoal1-v0")
+    env2 = safety_gymnasium.make("SafetyPointGoal1-v0")
     print(type(env))
     env1 = custom_deepcopy(env)
     obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
