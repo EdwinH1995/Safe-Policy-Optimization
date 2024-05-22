@@ -102,7 +102,7 @@ def custom_deepcopy(env):
     elif isinstance(env, SafeRescaleAction):
         base_env = env.env
         base_env_copy = custom_deepcopy(base_env)
-        return SafeRescaleAction(base_env_copy, env.lower_bound, env.upper_bound)
+        return SafeRescaleAction(base_env_copy, env.min_action, env.max_action)
     elif isinstance(env, SafeAutoResetWrapper):
         base_env = env.env
         base_env_copy = custom_deepcopy(base_env)
