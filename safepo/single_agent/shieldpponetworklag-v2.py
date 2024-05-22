@@ -89,6 +89,11 @@ def builder_deepcopy(self, memo):
 # Dynamically add the method to the Builder class
 Builder.__deepcopy__ = builder_deepcopy
 
+def custom_deepcopy(obj):
+    """Custom deepcopy function to handle Builder objects."""
+    if isinstance(obj, Builder):
+        return obj.__deepcopy__({})
+    return deepcopy(obj)
 
 def main(args, cfg_env=None):
     # set the random seed, device and number of threads
@@ -194,7 +199,7 @@ def main(args, cfg_env=None):
     logger.setup_torch_saver(policy.actor)
     logger.log("Start with training.")
     obs,_= env.reset()
-    env1 = env.__deepcopy__({})
+    env1 = custom_deepcopy(env)
     obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
     ep_ret, ep_cost, ep_len = (
         np.zeros(args.num_envs),
