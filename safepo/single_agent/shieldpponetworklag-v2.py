@@ -115,10 +115,19 @@ def custom_deepcopy(env):
         base_env = env.env
         base_env_copy = custom_deepcopy(base_env)
         return SafeUnsqueeze(base_env_copy)
+    elif isinstance(env, SafeTimeLimit):
+        base_env = env.env
+        base_env_copy = custom_deepcopy(base_env)
+        return SafeTimeLimit(base_env_copy, env._max_episode_steps)
+    elif isinstance(env, SafetyAsyncVectorEnv):
+        # Handle deepcopy for SafetyAsyncVectorEnv
+        env_copies = [custom_deepcopy(e) for e in env.envs]
+        return SafetyAsyncVectorEnv(env_copies)
     elif isinstance(env, Builder):
+
         return env.__deepcopy__({})
     else:
-        print(print("Type of copied env:", type(env)))
+        print("Type of env:", type(env))
         return deepcopy(env)
     
 def main(args, cfg_env=None):
@@ -225,10 +234,10 @@ def main(args, cfg_env=None):
     logger.setup_torch_saver(policy.actor)
     logger.log("Start with training.")
     obs,_= env.reset()
-    print("Type of env:", type(env.env))
+    #print("Type of env:", type(env.env))
     #Check the type of env to understand its class
-    env2 = safety_gymnasium.make("SafetyPointGoal1-v0")
-    print(type(env2))
+    #env2 = safety_gymnasium.make("SafetyPointGoal1-v0")
+    #print(type(env2))
     env1 = custom_deepcopy(env)
     obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
     ep_ret, ep_cost, ep_len = (
