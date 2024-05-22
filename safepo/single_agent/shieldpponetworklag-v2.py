@@ -92,12 +92,6 @@ def builder_deepcopy(self, memo):
 # Dynamically add the method to the Builder class
 Builder.__deepcopy__ = builder_deepcopy
 
-def custom_deepcopy(obj):
-    """Custom deepcopy function to handle Builder objects."""
-    if isinstance(obj, Builder):
-        return obj.__deepcopy__({})
-    return deepcopy(obj)
-
 def custom_deepcopy(env):
     """Custom deepcopy function to handle Builder and wrapped environments."""
     if isinstance(env, SafeNormalizeObservation):
