@@ -199,6 +199,7 @@ def main(args, cfg_env=None):
     logger.setup_torch_saver(policy.actor)
     logger.log("Start with training.")
     obs,_= env.reset()
+    print("Type of env:", type(env))
     env1 = custom_deepcopy(env)
     obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
     ep_ret, ep_cost, ep_len = (
