@@ -96,6 +96,30 @@ def custom_deepcopy(obj):
         return obj.__deepcopy__({})
     return deepcopy(obj)
 
+def custom_deepcopy(env):
+    """Custom deepcopy function to handle Builder and wrapped environments."""
+    if isinstance(env, SafeNormalizeObservation):
+        base_env = env.env
+        base_env_copy = custom_deepcopy(base_env)
+        return SafeNormalizeObservation(base_env_copy)
+    elif isinstance(env, SafeRescaleAction):
+        base_env = env.env
+        base_env_copy = custom_deepcopy(base_env)
+        return SafeRescaleAction(base_env_copy, env.lower_bound, env.upper_bound)
+    elif isinstance(env, SafeAutoResetWrapper):
+        base_env = env.env
+        base_env_copy = custom_deepcopy(base_env)
+        return SafeAutoResetWrapper(base_env_copy)
+    elif isinstance(env, SafeUnsqueeze):
+        base_env = env.env
+        base_env_copy = custom_deepcopy(base_env)
+        return SafeUnsqueeze(base_env_copy)
+    elif isinstance(env, Builder):
+        return env.__deepcopy__({})
+    else:
+        print(print("Type of copied env:", type(env)))
+        return deepcopy(env)
+    
 def main(args, cfg_env=None):
     # set the random seed, device and number of threads
     random.seed(args.seed)
