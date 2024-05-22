@@ -46,6 +46,7 @@ from safety_gymnasium.vector.async_vector_env import SafetyAsyncVectorEnv
 from safety_gymnasium.builder import Builder
 from safepo.common.wrappers import SafeNormalizeObservation
 from safety_gymnasium.wrappers import SafeRescaleAction, SafeAutoResetWrapper, SafeUnsqueeze, SafeTimeLimit
+from gymnasium.wrappers import OrderEnforcing
 
 default_cfg = {
     'hidden_sizes': [64, 64],
@@ -135,6 +136,12 @@ def custom_deepcopy(env):
             return _thunk
         env_copies = [create_env_fn(e) for e in env.env_fns]
         return SafetyAsyncVectorEnv(env_copies)
+    elif isinstance(env, OrderEnforcing):
+        base_env = env.env
+        base_env_copy = custom_deepcopy(base_env)
+        if base_env_copy is None:
+            raise ValueError("Failed to deepcopy OrderEnforcing's base environment")
+        return OrderEnforcing(base_env_copy, disable_render_order_enforcing=env.disable_render_order_enforcing)
     elif isinstance(env, Builder):
         return env.__deepcopy__({})
     else:
